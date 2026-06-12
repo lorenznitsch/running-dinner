@@ -5,10 +5,21 @@ import { supabase } from '../lib/supabase'
 const ACCENT = '#1D9E75'
 
 function exportCsv(responses, eventName) {
-  const header = ['Namen', 'Ernährung', 'Allergien', 'Adresse', 'Klingelschild', 'Telefon', 'Hinweise']
-  const rows = responses.map(r => [
-    r.names, r.diet, r.allergies || '', r.address, r.doorbell || '', r.phone || '', r.notes || '',
-  ])
+  const header = ['Namen', 'E-Mail', 'Ernährung', 'Allergien', 'Adresse 1', 'Klingelschild 1', 'Adresse 2', 'Klingelschild 2', 'Telefon 1', 'Telefon 2', 'Hinweise']
+  const rows = responses.map(r => {
+    const addr1 = r.street1
+      ? `${r.street1} ${r.housenumber1 || ''}, ${r.zip1 || ''} ${r.city1 || ''}`.trim()
+      : (r.address || '')
+    const addr2 = r.street2
+      ? `${r.street2} ${r.housenumber2 || ''}, ${r.zip2 || ''} ${r.city2 || ''}`.trim()
+      : ''
+    return [
+      r.names, r.email || '', r.diet, r.allergies || '',
+      addr1, r.doorbell1 || r.doorbell || '',
+      addr2, r.doorbell2 || '',
+      r.phone1 || r.phone || '', r.phone2 || '', r.notes || '',
+    ]
+  })
   const csv = [header, ...rows]
     .map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
     .join('\n')
@@ -228,9 +239,10 @@ export default function AdminPage() {
                   <tr className="text-left text-xs text-gray-400 uppercase tracking-wide border-b border-gray-100 bg-gray-50">
                     <th className="px-4 py-3 font-semibold">#</th>
                     <th className="px-4 py-3 font-semibold">Namen</th>
+                    <th className="px-4 py-3 font-semibold">E-Mail</th>
                     <th className="px-4 py-3 font-semibold">Ernährung</th>
                     <th className="px-4 py-3 font-semibold">Allergien</th>
-                    <th className="px-4 py-3 font-semibold">Adresse</th>
+                    <th className="px-4 py-3 font-semibold">Adresse(n)</th>
                     <th className="px-4 py-3 font-semibold">Klingel</th>
                     <th className="px-4 py-3 font-semibold">Telefon</th>
                     <th className="px-4 py-3 font-semibold">Hinweis</th>
@@ -238,25 +250,49 @@ export default function AdminPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {responses.map((r, i) => (
-                    <tr key={r.id} className="hover:bg-gray-50 transition-colors">
-                      <td className="px-4 py-3 text-gray-400 text-xs">{i + 1}</td>
-                      <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">{r.names}</td>
-                      <td className="px-4 py-3">
-                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${dietColors[r.diet] || dietColors.omnivor}`}>
-                          {r.diet || 'omnivor'}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-orange-600 text-xs">{r.allergies || <span className="text-gray-300">–</span>}</td>
-                      <td className="px-4 py-3 text-gray-600 text-xs max-w-36 truncate">{r.address}</td>
-                      <td className="px-4 py-3 text-gray-500 text-xs">{r.doorbell || <span className="text-gray-300">–</span>}</td>
-                      <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">{r.phone || <span className="text-gray-300">–</span>}</td>
-                      <td className="px-4 py-3 text-gray-400 text-xs max-w-32 truncate">{r.notes || <span className="text-gray-300">–</span>}</td>
-                      <td className="px-4 py-3 text-gray-400 text-xs whitespace-nowrap">
-                        {new Date(r.submitted_at).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
-                      </td>
-                    </tr>
-                  ))}
+                  {responses.map((r, i) => {
+                    // Compose address display
+                    const addr1 = r.street1
+                      ? `${r.street1} ${r.housenumber1 || ''}, ${r.zip1 || ''} ${r.city1 || ''}`.trim()
+                      : (r.address || '–')
+                    const addr2 = r.street2
+                      ? `${r.street2} ${r.housenumber2 || ''}, ${r.zip2 || ''} ${r.city2 || ''}`.trim()
+                      : null
+                    const phones = [r.phone1 || r.phone, r.phone2].filter(Boolean).join(' / ')
+                    const doorbells = [r.doorbell1 || r.doorbell, r.doorbell2].filter(Boolean).join(' / ')
+
+                    return (
+                      <tr key={r.id} className="hover:bg-gray-50 transition-colors">
+                        <td className="px-4 py-3 text-gray-400 text-xs">{i + 1}</td>
+                        <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">{r.names}</td>
+                        <td className="px-4 py-3 text-blue-600 text-xs whitespace-nowrap">
+                          {r.email
+                            ? <a href={`mailto:${r.email}`} className="underline hover:text-blue-800">{r.email}</a>
+                            : <span className="text-gray-300">–</span>}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${dietColors[r.diet] || dietColors.omnivor}`}>
+                            {r.diet || 'omnivor'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-orange-600 text-xs">{r.allergies || <span className="text-gray-300">–</span>}</td>
+                        <td className="px-4 py-3 text-gray-600 text-xs">
+                          <span>{addr1}</span>
+                          {addr2 && <span className="block text-gray-400 mt-0.5">({addr2})</span>}
+                        </td>
+                        <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">
+                          {doorbells || <span className="text-gray-300">–</span>}
+                        </td>
+                        <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">
+                          {phones || <span className="text-gray-300">–</span>}
+                        </td>
+                        <td className="px-4 py-3 text-gray-400 text-xs max-w-32 truncate">{r.notes || <span className="text-gray-300">–</span>}</td>
+                        <td className="px-4 py-3 text-gray-400 text-xs whitespace-nowrap">
+                          {new Date(r.submitted_at).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
