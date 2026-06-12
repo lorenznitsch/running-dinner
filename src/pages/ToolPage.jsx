@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import { parseCSV, generatePlan, buildMessage } from '../utils/algorithm'
 import { jsPDF } from 'jspdf'
 import html2canvas from 'html2canvas'
@@ -527,8 +527,12 @@ function Step4({ plan, teams, config, onBack }) {
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 export default function ToolPage() {
-  const [step, setStep] = useState(1)
-  const [teams, setTeams] = useState(null)
+  const location = useLocation()
+  // Accept teams injected via React Router state (from AdminPage)
+  const injectedTeams = location.state?.teams ?? null
+
+  const [step, setStep] = useState(injectedTeams ? 2 : 1)
+  const [teams, setTeams] = useState(injectedTeams)
   const [config, setConfig] = useState(null)
   const [plan, setPlan] = useState(null)
 

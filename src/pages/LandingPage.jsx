@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom'
 import { useState, useEffect, useRef } from 'react'
+import CreateSurveyModal from '../components/CreateSurveyModal'
 
 const ACCENT = '#1D9E75'
 const FORMS_URL = 'https://docs.google.com/forms/d/1R967Yds619dSd6Z6TvLm6QWtjUr_81Db3a9W2-rbAdg/copy'
@@ -25,6 +26,8 @@ function Navbar() {
 }
 
 function Hero() {
+  const [showModal, setShowModal] = useState(false)
+
   return (
     <section className="bg-gradient-to-b from-green-50 to-white py-24 px-4">
       <div className="max-w-3xl mx-auto text-center">
@@ -36,26 +39,31 @@ function Hero() {
           <span style={{ color: ACCENT }}>perfekt geplant.</span>
         </h1>
         <p className="text-xl text-gray-500 mb-10 max-w-xl mx-auto">
-          Importiere die Anmeldungen aus Google Forms, generiere automatisch den Dinner-Plan und verschicke fertige WhatsApp-Nachrichten – alles im Browser, keine Daten verlassen deinen Rechner.
+          Erstelle eine Umfrage, teile den Link mit deinen Gästen und generiere automatisch den Dinner-Plan – alles ohne Login oder Google Forms.
         </p>
         <div className="flex flex-col sm:flex-row gap-4 justify-center">
-          <Link
-            to="/tool"
+          <button
+            onClick={() => setShowModal(true)}
             className="px-7 py-3 rounded-xl font-semibold text-white text-base transition-opacity hover:opacity-90 shadow-md"
             style={{ backgroundColor: ACCENT }}
           >
-            CSV hochladen & starten
-          </Link>
-          <a
-            href={FORMS_URL}
-            target="_blank"
-            rel="noopener noreferrer"
+            ✨ Neue Umfrage erstellen
+          </button>
+          <Link
+            to="/tool"
             className="px-7 py-3 rounded-xl font-semibold text-gray-700 text-base border border-gray-200 bg-white hover:bg-gray-50 transition-colors"
           >
-            Google Forms Template herunterladen
-          </a>
+            CSV hochladen & starten
+          </Link>
         </div>
+        <p className="text-xs text-gray-400 mt-5">
+          Lieber Google Forms?{' '}
+          <a href={FORMS_URL} target="_blank" rel="noopener noreferrer" className="underline hover:text-gray-600 transition-colors">
+            Template herunterladen
+          </a>
+        </p>
       </div>
+      {showModal && <CreateSurveyModal onClose={() => setShowModal(false)} />}
     </section>
   )
 }

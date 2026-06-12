@@ -6,6 +6,8 @@ import LandingPage from './pages/LandingPage'
 import ToolPage from './pages/ToolPage'
 import DatenschutzPage from './pages/DatenschutzPage'
 import MapPage from './pages/MapPage'
+import SurveyPage from './pages/SurveyPage'
+import AdminPage from './pages/AdminPage'
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
@@ -15,6 +17,8 @@ createRoot(document.getElementById('root')).render(
         <Route path="/tool" element={<ToolPage />} />
         <Route path="/datenschutz" element={<DatenschutzPage />} />
         <Route path="/map" element={<MapPage />} />
+        <Route path="/survey/:surveyId" element={<SurveyPage />} />
+        <Route path="/admin/:surveyId" element={<AdminPage />} />
       </Routes>
     </BrowserRouter>
   </StrictMode>,
