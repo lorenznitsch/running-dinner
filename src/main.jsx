@@ -8,6 +8,7 @@ import DatenschutzPage from './pages/DatenschutzPage'
 import MapPage from './pages/MapPage'
 import SurveyPage from './pages/SurveyPage'
 import AdminPage from './pages/AdminPage'
+import FuerGaestePage from './pages/FuerGaestePage'
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
@@ -19,6 +20,7 @@ createRoot(document.getElementById('root')).render(
         <Route path="/map" element={<MapPage />} />
         <Route path="/survey/:surveyId" element={<SurveyPage />} />
         <Route path="/admin/:surveyId" element={<AdminPage />} />
+        <Route path="/fuer-gaeste" element={<FuerGaestePage />} />
       </Routes>
     </BrowserRouter>
   </StrictMode>,

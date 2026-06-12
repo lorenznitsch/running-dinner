@@ -7,7 +7,6 @@ import html2canvas from 'html2canvas'
 import { Document, Packer, Paragraph, TextRun, PageBreak, HeadingLevel } from 'docx'
 import { saveAs } from 'file-saver'
 import JSZip from 'jszip'
-import emailjs from '@emailjs/browser'
 
 // ─── ICS Calendar helper ──────────────────────────────────────────────────────
 function toIcsDate(dateStr, timeStr) {
@@ -79,15 +78,6 @@ function buildIcs(team, config, messageText) {
 // ─── Phone cleaner ────────────────────────────────────────────────────────────
 function cleanPhone(raw) {
   return String(raw || '').replace(/[^\d+]/g, '').trim()
-}
-
-// ─── EmailJS localStorage keys ────────────────────────────────────────────────
-const LS_EMAILJS = 'rd_emailjs_config'
-function loadEmailJsConfig() {
-  try { return JSON.parse(localStorage.getItem(LS_EMAILJS)) || {} } catch { return {} }
-}
-function saveEmailJsConfig(cfg) {
-  localStorage.setItem(LS_EMAILJS, JSON.stringify(cfg))
 }
 
 const ACCENT = '#1D9E75'
@@ -227,7 +217,7 @@ function Step2({ teams, onNext, onBack }) {
           <textarea rows={3} placeholder={"Lisa Müller: 0151 12345678\nMax Schmidt: 0172 87654321"} value={config.contacts} onChange={e => set('contacts', e.target.value)} className="w-full border border-gray-200 rounded-xl px-4 py-3 text-gray-900 placeholder-gray-300 focus:outline-none focus:ring-2 resize-none" />
         </div>
         <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-2">WhatsApp-Gruppen-Link (optional)</label>
+          <label className="block text-sm font-semibold text-gray-700 mb-2">WhatsApp-Broadcast-Link (optional)</label>
           <input type="url" placeholder="https://chat.whatsapp.com/..." value={config.whatsappLink} onChange={e => set('whatsappLink', e.target.value)} className="w-full border border-gray-200 rounded-xl px-4 py-3 text-gray-900 placeholder-gray-300 focus:outline-none focus:ring-2" />
         </div>
       </div>
@@ -266,9 +256,10 @@ function Step3({ teams, config, onNext, onBack }) {
       // 3. Run backtracking assignment
       const result = assignTeams(teams, distMatrix)
 
-      // 4. Attach coordinates to result for later use
+      // 4. Attach coordinates + distMatrix to result for later use
       result.teamCoords = teamCoords
       result.dessertCoord = dessertCoord
+      result.distMatrix = distMatrix
 
       setPhase('done')
       onNext(result)
@@ -462,7 +453,7 @@ function Step4ManualAdjustment({ plan, config, onNext, onBack }) {
           className="flex-1 py-3 rounded-xl font-semibold text-white text-base transition-opacity"
           style={{ backgroundColor: ACCENT }}
         >
-          Plan übernehmen & weiter →
+          Plan bestätigen & Nachrichten erstellen →
         </button>
       </div>
     </div>
@@ -640,83 +631,40 @@ function MapTab({ plan, config }) {
 
 // ─── MessagesTab ──────────────────────────────────────────────────────────────
 function MessagesTab({ messages, config, handleMessageDocx }) {
-  // ── EmailJS state ──
-  const [ejsCfg, setEjsCfg] = useState(loadEmailJsConfig)
-  const [ejsInput, setEjsInput] = useState({ serviceId: '', templateId: '', publicKey: '' })
-  const [ejsConfigured, setEjsConfigured] = useState(() => {
-    const c = loadEmailJsConfig()
-    return !!(c.serviceId && c.templateId && c.publicKey)
-  })
-  const [ejsEditing, setEjsEditing] = useState(false)
-  const [ejsTesting, setEjsTesting] = useState(false)
-  const [ejsTestResult, setEjsTestResult] = useState('')
-  const [ejsSending, setEjsSending] = useState(false)
-  const [ejsProgress, setEjsProgress] = useState(null) // { sent, total, errors }
-  const [ejsDone, setEjsDone] = useState(null)
-  const [testEmail, setTestEmail] = useState('')
+  // ── mailto helpers ──
+  const buildMailto = (team, text) => {
+    const email = team.email || ''
+    const email2 = team.email2 || ''
+    const subject = encodeURIComponent('Dein persönlicher Running Dinner Plan 🍽️')
+    const body = encodeURIComponent(text)
+    let href = `mailto:${email}?subject=${subject}&body=${body}`
+    if (email2) href += `&cc=${encodeURIComponent(email2)}`
+    return href
+  }
 
-  const saveEjsCfg = () => {
-    if (!ejsInput.serviceId || !ejsInput.templateId || !ejsInput.publicKey) return
-    saveEmailJsConfig(ejsInput)
-    setEjsCfg(ejsInput)
-    setEjsConfigured(true)
-    setEjsEditing(false)
-    setEjsTestResult('')
-  }
-  const handleTest = async () => {
-    setEjsTesting(true); setEjsTestResult('')
-    try {
-      const cfg = ejsConfigured ? ejsCfg : ejsInput
-      await emailjs.send(cfg.serviceId, cfg.templateId, {
-        to_email: testEmail || 'test@example.com',
-        to_name: 'Test',
-        message: 'Das ist eine Test-Nachricht vom Running Dinner Generator. 🍽️',
-      }, cfg.publicKey)
-      setEjsTestResult('✅ Test-Mail erfolgreich gesendet!')
-    } catch (e) {
-      setEjsTestResult('❌ Fehler: ' + (e?.text || e?.message || JSON.stringify(e)))
-    } finally { setEjsTesting(false) }
-  }
-  const handleSendAll = async () => {
-    const teamsWithEmail = messages.filter(m => m.team.email)
-    if (!teamsWithEmail.length) { setEjsDone({ sent: 0, errors: messages.length }); return }
-    setEjsSending(true); setEjsProgress({ sent: 0, total: teamsWithEmail.length, errors: 0 }); setEjsDone(null)
-    let sent = 0, errors = 0
-    for (const { team, text } of teamsWithEmail) {
-      try {
-        await emailjs.send(ejsCfg.serviceId, ejsCfg.templateId, {
-          to_email: team.email,
-          to_name: team.names,
-          message: text,
-        }, ejsCfg.publicKey)
-        sent++
-      } catch { errors++ }
-      setEjsProgress({ sent: sent + errors, total: teamsWithEmail.length, errors })
-      await new Promise(r => setTimeout(r, 250)) // rate-limit
+  const [openAllHint, setOpenAllHint] = useState(false)
+  const handleOpenAll = async () => {
+    setOpenAllHint(true)
+    for (let i = 0; i < messages.length; i++) {
+      const { team, text } = messages[i]
+      if (!team.email) continue
+      const a = document.createElement('a')
+      a.href = buildMailto(team, text)
+      a.click()
+      await new Promise(r => setTimeout(r, 800))
     }
-    setEjsSending(false); setEjsDone({ sent, errors })
-  }
-  const handleSendOne = async (team, text) => {
-    if (!team.email) { alert('Kein E-Mail für dieses Team hinterlegt.'); return }
-    try {
-      await emailjs.send(ejsCfg.serviceId, ejsCfg.templateId, {
-        to_email: team.email, to_name: team.names, message: text,
-      }, ejsCfg.publicKey)
-      alert(`✅ Mail an ${team.email} gesendet!`)
-    } catch (e) { alert('❌ Fehler: ' + (e?.text || e?.message)) }
   }
 
-  // ── WhatsApp state ──
+  // ── WhatsApp Broadcast ──
   const allPhones = messages.flatMap(({ team }) =>
     [team.phone, team.phone1, team.phone2].filter(Boolean).map(cleanPhone).filter(p => p.length >= 6)
-  ).filter((p, i, arr) => arr.indexOf(p) === i) // dedupe
+  ).filter((p, i, arr) => arr.indexOf(p) === i)
   const phonesText = allPhones.join('\n')
   const [phonesCopied, setPhonesCopied] = useState(false)
   const copyPhones = async () => {
     await navigator.clipboard.writeText(phonesText)
     setPhonesCopied(true); setTimeout(() => setPhonesCopied(false), 2500)
   }
-  const firstPhone = allPhones[0] || ''
 
   // ── ICS / ZIP ──
   const downloadIcs = (team, text) => {
@@ -737,130 +685,65 @@ function MessagesTab({ messages, config, handleMessageDocx }) {
   }
 
   const noDate = !config.date
+  const teamsWithEmail = messages.filter(m => m.team.email)
 
   return (
     <div className="space-y-6">
 
-      {/* ── EmailJS Section ── */}
+      {/* ── Mail Section ── */}
       <div className="border border-gray-200 rounded-xl overflow-hidden">
         <div className="px-5 py-4 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="text-lg">✉️</span>
-            <span className="font-semibold text-gray-900 text-sm">Mails verschicken</span>
-            {ejsConfigured && !ejsEditing && (
-              <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-green-100 text-green-700">verbunden</span>
-            )}
+            <span className="font-semibold text-gray-900 text-sm">Mails öffnen</span>
+            <span className="text-xs text-gray-400">({teamsWithEmail.length} von {messages.length} mit E-Mail)</span>
           </div>
-          {ejsConfigured && !ejsEditing && (
-            <button onClick={() => { setEjsEditing(true); setEjsInput(ejsCfg) }} className="text-xs text-gray-400 hover:text-gray-700 underline">Einstellungen</button>
-          )}
         </div>
-
-        <div className="px-5 py-4">
-          {(!ejsConfigured || ejsEditing) ? (
-            <div className="space-y-4">
-              <p className="text-xs text-gray-500 leading-relaxed">
-                Konfiguriere EmailJS um Nachrichten direkt aus dem Browser zu versenden.{' '}
-                <a href="https://www.emailjs.com/docs/" target="_blank" rel="noopener noreferrer" className="underline" style={{ color: ACCENT }}>Zur Anleitung →</a>
-                {' '}(Lies auch <strong>EMAILJS-SETUP.md</strong> im Projekt-Root.)
-              </p>
-              {[
-                { key: 'serviceId',  label: 'Service ID',   ph: 'service_xxxxxxx' },
-                { key: 'templateId', label: 'Template ID',  ph: 'template_xxxxxxx' },
-                { key: 'publicKey',  label: 'Public Key',   ph: 'xxxxxxxxxxxxxxx' },
-              ].map(({ key, label, ph }) => (
-                <div key={key}>
-                  <label className="block text-xs font-semibold text-gray-600 mb-1">{label}</label>
-                  <input
-                    type="text" placeholder={ph} value={ejsInput[key]}
-                    onChange={e => setEjsInput(p => ({ ...p, [key]: e.target.value }))}
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-green-200"
-                  />
-                </div>
-              ))}
-              <div>
-                <label className="block text-xs font-semibold text-gray-600 mb-1">Test-E-Mail-Adresse</label>
-                <input type="email" placeholder="deine@email.de" value={testEmail}
-                  onChange={e => setTestEmail(e.target.value)}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-200"
-                />
-              </div>
-              {ejsTestResult && <p className="text-xs">{ejsTestResult}</p>}
-              <div className="flex gap-2">
-                <button onClick={handleTest} disabled={ejsTesting}
-                  className="flex-1 py-2 rounded-lg text-xs font-semibold border border-gray-200 hover:bg-gray-50 disabled:opacity-50">
-                  {ejsTesting ? '⏳ Sende…' : '🧪 Verbindung testen'}
-                </button>
-                <button onClick={saveEjsCfg}
-                  className="flex-1 py-2 rounded-lg text-xs font-bold text-white disabled:opacity-40"
-                  style={{ backgroundColor: ACCENT }}
-                  disabled={!ejsInput.serviceId || !ejsInput.templateId || !ejsInput.publicKey}>
-                  💾 Speichern
-                </button>
-              </div>
-              {ejsEditing && <button onClick={() => setEjsEditing(false)} className="w-full text-xs text-gray-400 hover:text-gray-600">Abbrechen</button>}
+        <div className="px-5 py-4 space-y-3">
+          {openAllHint && (
+            <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800">
+              ℹ️ Dein Browser öffnet für jedes Team ein Mail-Fenster. Bitte erlaube Pop-ups falls nötig.
             </div>
-          ) : (
-            <div className="space-y-3">
-              {ejsDone && (
-                <div className={`p-3 rounded-lg text-sm ${ejsDone.errors ? 'bg-yellow-50 border border-yellow-200 text-yellow-800' : 'bg-green-50 border border-green-200 text-green-800'}`}>
-                  ✅ {ejsDone.sent} Mail{ejsDone.sent !== 1 ? 's' : ''} gesendet{ejsDone.errors ? `, ❌ ${ejsDone.errors} fehlgeschlagen` : ''}
-                </div>
-              )}
-              {ejsProgress && ejsSending && (
-                <div className="space-y-2">
-                  <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                    <div className="h-full rounded-full transition-all" style={{ backgroundColor: ACCENT, width: `${(ejsProgress.sent / ejsProgress.total) * 100}%` }} />
-                  </div>
-                  <p className="text-xs text-gray-500 text-center">{ejsProgress.sent} von {ejsProgress.total} Mails gesendet…</p>
-                </div>
-              )}
-              <div className="flex gap-2">
-                <button onClick={handleSendAll} disabled={ejsSending}
-                  className="flex-1 py-2.5 rounded-lg text-sm font-bold text-white disabled:opacity-50 transition-opacity"
-                  style={{ backgroundColor: ACCENT }}>
-                  {ejsSending ? '⏳ Sende…' : `📨 Alle ${messages.length} Mails verschicken`}
-                </button>
-              </div>
-              {messages.some(m => !m.team.email) && (
-                <p className="text-xs text-orange-600">⚠️ {messages.filter(m => !m.team.email).length} Teams ohne E-Mail-Adresse – diese werden übersprungen.</p>
-              )}
-            </div>
+          )}
+          <button
+            onClick={handleOpenAll}
+            disabled={teamsWithEmail.length === 0}
+            className="w-full py-2.5 rounded-lg text-sm font-bold text-white transition-opacity disabled:opacity-40"
+            style={{ backgroundColor: ACCENT }}
+          >
+            📨 Alle {teamsWithEmail.length} Mails öffnen (nacheinander)
+          </button>
+          {messages.some(m => !m.team.email) && (
+            <p className="text-xs text-orange-600">⚠️ {messages.filter(m => !m.team.email).length} Teams ohne E-Mail – diese werden übersprungen.</p>
           )}
         </div>
       </div>
 
-      {/* ── WhatsApp Group Section ── */}
+      {/* ── WhatsApp Broadcast Section ── */}
       <div className="border border-gray-200 rounded-xl overflow-hidden">
         <div className="px-5 py-4 bg-gray-50 border-b border-gray-200">
           <div className="flex items-center gap-2">
             <span className="text-lg">💬</span>
-            <span className="font-semibold text-gray-900 text-sm">WhatsApp-Gruppe erstellen</span>
+            <span className="font-semibold text-gray-900 text-sm">WhatsApp-Broadcast</span>
             <span className="text-xs text-gray-400">({allPhones.length} Nummern)</span>
           </div>
         </div>
         <div className="px-5 py-4 space-y-4">
+          <p className="text-xs text-gray-500 leading-relaxed">
+            Ein WhatsApp-Broadcast erlaubt dir, allen Teilnehmern gleichzeitig eine Nachricht zu schicken, ohne dass sie sich gegenseitig sehen.
+          </p>
           <textarea
             readOnly value={phonesText}
             rows={Math.min(allPhones.length, 8)}
             className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-xs font-mono text-gray-700 bg-gray-50 resize-none focus:outline-none"
           />
-          <div className="flex gap-2">
-            <button onClick={copyPhones}
-              className="flex-1 py-2.5 rounded-lg text-sm font-semibold border transition-colors"
-              style={{ borderColor: phonesCopied ? ACCENT : '#d1d5db', color: phonesCopied ? ACCENT : '#374151', backgroundColor: phonesCopied ? '#f0fdf6' : 'white' }}>
-              {phonesCopied ? '✅ Kopiert!' : '📋 Alle Nummern kopieren'}
-            </button>
-            {firstPhone && (
-              <a href={`https://wa.me/${firstPhone.replace(/^\+/, '')}`} target="_blank" rel="noopener noreferrer"
-                className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white text-center"
-                style={{ backgroundColor: '#25D366' }}>
-                📱 WhatsApp öffnen
-              </a>
-            )}
-          </div>
+          <button onClick={copyPhones}
+            className="w-full py-2.5 rounded-lg text-sm font-semibold border transition-colors"
+            style={{ borderColor: phonesCopied ? ACCENT : '#d1d5db', color: phonesCopied ? ACCENT : '#374151', backgroundColor: phonesCopied ? '#f0fdf6' : 'white' }}>
+            {phonesCopied ? '✅ Nummern kopiert!' : '📋 Alle Nummern kopieren'}
+          </button>
           <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800 leading-relaxed">
-            💡 Öffne WhatsApp → Neue Gruppe → Kontakte einladen. Füge die kopierten Nummern manuell hinzu oder scanne den Gruppen-QR-Code.
+            💡 Öffne WhatsApp → Neue Broadcast-Liste → füge die kopierten Nummern hinzu. Alle Teilnehmer erhalten die Nachricht einzeln – sie sehen sich nicht gegenseitig.
           </div>
         </div>
       </div>
@@ -876,29 +759,41 @@ function MessagesTab({ messages, config, handleMessageDocx }) {
 
       {/* ── Per-team cards ── */}
       <div className="space-y-4">
-        {messages.map(({ team, text }, i) => (
-          <div key={i} className="border border-gray-200 rounded-xl overflow-hidden">
-            <div className="flex flex-wrap items-center gap-2 px-4 py-3 bg-gray-50 border-b border-gray-200">
-              <span className="font-semibold text-gray-900 text-sm flex-1 min-w-0 truncate">{team.names}</span>
-              <div className="flex gap-1.5 flex-wrap">
-                <CopyButton text={text} />
-                <button onClick={() => downloadIcs(team, text)}
-                  className="text-xs px-3 py-1.5 rounded-lg font-semibold border border-gray-200 hover:bg-gray-50 text-gray-600 transition-colors">
-                  📅 .ics
-                </button>
-                {ejsConfigured && (
-                  <button onClick={() => handleSendOne(team, text)}
-                    className="text-xs px-3 py-1.5 rounded-lg font-semibold border text-white transition-colors"
-                    style={{ backgroundColor: ACCENT, borderColor: ACCENT }}
-                    title={team.email || 'Keine E-Mail'}>
-                    ✉️ {team.email ? 'Mail' : '—'}
+        {messages.map(({ team, text }, i) => {
+          const hasEmail = !!team.email
+          return (
+            <div key={i} className="border border-gray-200 rounded-xl overflow-hidden">
+              <div className="flex flex-wrap items-center gap-2 px-4 py-3 bg-gray-50 border-b border-gray-200">
+                <span className="font-semibold text-gray-900 text-sm flex-1 min-w-0 truncate">{team.names}</span>
+                <div className="flex gap-1.5 flex-wrap">
+                  <CopyButton text={text} />
+                  <button onClick={() => downloadIcs(team, text)}
+                    className="text-xs px-3 py-1.5 rounded-lg font-semibold border border-gray-200 hover:bg-gray-50 text-gray-600 transition-colors">
+                    📅 .ics
                   </button>
-                )}
+                  {hasEmail ? (
+                    <a
+                      href={buildMailto(team, text)}
+                      className="text-xs px-3 py-1.5 rounded-lg font-semibold border text-white transition-colors"
+                      style={{ backgroundColor: ACCENT, borderColor: ACCENT }}
+                      title={`Mail an ${team.email}${team.email2 ? ` + CC: ${team.email2}` : ''}`}
+                    >
+                      ✉️ Mail öffnen
+                    </a>
+                  ) : (
+                    <span
+                      className="text-xs px-3 py-1.5 rounded-lg font-semibold border border-gray-200 text-gray-300 cursor-not-allowed"
+                      title="Keine E-Mail-Adresse in den Anmeldedaten"
+                    >
+                      ✉️ keine E-Mail
+                    </span>
+                  )}
+                </div>
               </div>
+              <pre className="px-4 py-4 text-xs text-gray-600 whitespace-pre-wrap font-mono leading-relaxed">{text}</pre>
             </div>
-            <pre className="px-4 py-4 text-xs text-gray-600 whitespace-pre-wrap font-mono leading-relaxed">{text}</pre>
-          </div>
-        ))}
+          )
+        })}
       </div>
 
       {/* ── DOCX Export ── */}
@@ -931,6 +826,29 @@ function Step5({ plan, teams, config, onBack }) {
     const h = (canvas.height / canvas.width) * w
     pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 10, 10, w, h)
     pdf.save('running-dinner-plan.pdf')
+  }
+
+  // CSV: plan table
+  const handlePlanCsv = () => {
+    const header = ['Team', 'Kocht Gang', 'Vorspeise bei (Adresse)', 'Hauptspeise bei (Adresse)', 'Ernährung', 'Allergien']
+    const rows = plan.teams.map(team => [
+      team.names,
+      courseLabels[team.hostCourse] || team.hostCourse || '',
+      team.groups?.starter?.host?.address || team.groups?.starter?.host?.names || '—',
+      team.groups?.main?.host?.address || team.groups?.main?.host?.names || '—',
+      team.diet || '',
+      team.allergies || '',
+    ])
+    const csv = [header, ...rows]
+      .map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+      .join('\n')
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'running-dinner-plan.csv'
+    a.click()
+    URL.revokeObjectURL(url)
   }
 
   // DOCX: messages
@@ -1004,9 +922,14 @@ function Step5({ plan, teams, config, onBack }) {
               </tbody>
             </table>
           </div>
-          <button onClick={handlePlanPdf} className="mt-5 w-full py-2.5 rounded-xl font-semibold text-sm border border-gray-200 hover:bg-gray-50 transition-colors">
-            📥 Als PDF speichern
-          </button>
+          <div className="flex gap-3 mt-5">
+            <button onClick={handlePlanPdf} className="flex-1 py-2.5 rounded-xl font-semibold text-sm border border-gray-200 hover:bg-gray-50 transition-colors">
+              📥 Als PDF speichern
+            </button>
+            <button onClick={handlePlanCsv} className="flex-1 py-2.5 rounded-xl font-semibold text-sm border border-gray-200 hover:bg-gray-50 transition-colors">
+              📊 Als CSV exportieren
+            </button>
+          </div>
 
           {/* Validation summary */}
           <div className="mt-5 flex flex-wrap gap-3">

@@ -17,7 +17,7 @@ export default function DatenschutzPage() {
 
       <main className="max-w-3xl mx-auto px-4 py-16">
         <h1 className="text-4xl font-bold text-gray-900 mb-2">Datenschutzerklärung</h1>
-        <p className="text-gray-400 text-sm mb-12">Stand: Juni 2025</p>
+        <p className="text-gray-400 text-sm mb-12">Stand: Juni 2026</p>
 
         <div className="prose prose-gray max-w-none space-y-10 text-gray-700 leading-relaxed">
 
@@ -33,15 +33,22 @@ export default function DatenschutzPage() {
           </section>
 
           <section>
-            <h2 className="text-xl font-bold text-gray-900 mb-3">2. Grundsatz: Clientseitige Verarbeitung</h2>
+            <h2 className="text-xl font-bold text-gray-900 mb-3">2. Datenverarbeitung im Überblick</h2>
             <p>
-              Diese Webanwendung verarbeitet alle von Ihnen eingegebenen oder hochgeladenen Daten
-              <strong> ausschließlich lokal in Ihrem Browser</strong>. Es findet keinerlei Übertragung
-              personenbezogener Daten (z.&nbsp;B. Namen, Adressen, Ernährungsangaben aus der CSV-Datei)
-              an externe Server statt. Sobald Sie den Browser-Tab schließen oder die Seite neu laden,
-              werden alle Daten unwiderruflich gelöscht. Es gibt keine Datenbank, kein Backend und
-              keine serverseitige Speicherung.
+              Diese Webanwendung verarbeitet Daten auf zwei Wegen:
             </p>
+            <ul className="mt-3 list-disc pl-5 space-y-2 text-sm">
+              <li>
+                <strong>Clientseitig (nur im Browser):</strong> Die Plan-Generierung, Nachrichtenerstellung, Kartenansicht
+                und der CSV-Import werden ausschließlich lokal in Ihrem Browser verarbeitet. Diese Daten verlassen
+                Ihren Browser nicht und werden nach dem Schließen des Tabs gelöscht.
+              </li>
+              <li>
+                <strong>Serverseitig (Supabase):</strong> Wenn Sie die Umfrage-Funktion nutzen, werden Anmeldedaten
+                von Teilnehmern (Namen, Adressen, E-Mail-Adressen, Telefonnummern, Ernährungsangaben) in einer
+                Datenbank bei Supabase gespeichert (siehe Abschnitt 6).
+              </li>
+            </ul>
           </section>
 
           <section>
@@ -78,7 +85,42 @@ export default function DatenschutzPage() {
           </section>
 
           <section>
-            <h2 className="text-xl font-bold text-gray-900 mb-3">5. Externer Dienst: OpenStreetMap / Nominatim</h2>
+            <h2 className="text-xl font-bold text-gray-900 mb-3">5. Speicherung von Anmeldedaten (Supabase)</h2>
+            <p>
+              Wenn Teilnehmer das Online-Anmeldeformular unter <code className="bg-gray-100 px-1 rounded text-sm">/survey/:id</code> ausfüllen,
+              werden folgende Daten in einer Datenbank bei <strong>Supabase Inc.</strong> gespeichert:
+            </p>
+            <ul className="mt-3 list-disc pl-5 space-y-1 text-sm">
+              <li>Namen der Teilnehmer</li>
+              <li>E-Mail-Adresse(n) (bis zu zwei pro Gruppe)</li>
+              <li>Telefonnummer(n)</li>
+              <li>Wohnadresse (Straße, Hausnummer, PLZ, Ort, Klingelschild)</li>
+              <li>Ernährungsweise und Allergien</li>
+              <li>Freitext-Hinweise</li>
+            </ul>
+            <p className="mt-3">
+              Die Daten werden nur dem Organisator des jeweiligen Events (Inhaber des Admin-Links) zugänglich gemacht
+              und ausschließlich zur Planung und Durchführung des Running Dinners verwendet.
+            </p>
+            <p className="mt-2">
+              Supabase betreibt seine Datenbankserver innerhalb der EU (Frankfurt, AWS eu-central-1).
+              Weitere Informationen finden Sie in der{' '}
+              <a href="https://supabase.com/privacy" target="_blank" rel="noopener noreferrer" className="underline" style={{ color: ACCENT }}>Datenschutzrichtlinie von Supabase</a>.
+              Rechtsgrundlage ist Art.&nbsp;6 Abs.&nbsp;1 lit.&nbsp;a DSGVO (Einwilligung durch Ausfüllen des Formulars).
+            </p>
+            <p className="mt-2">
+              <strong>E-Mail-Adressen:</strong> Die gespeicherten E-Mail-Adressen können vom Organisator genutzt werden,
+              um Teilnehmer mit dem persönlichen Dinner-Plan zu kontaktieren. Das Versenden erfolgt über die native
+              Mail-App des Organisators (mailto-Link) – es werden keine E-Mails über Drittanbieter-Server versendet.
+            </p>
+            <p className="mt-2">
+              Sie können jederzeit die Löschung Ihrer Daten beim Organisator oder unter{' '}
+              <a href="mailto:lorenz_nitsch@hotmail.de" className="underline" style={{ color: ACCENT }}>lorenz_nitsch@hotmail.de</a> beantragen.
+            </p>
+          </section>
+
+          <section>
+            <h2 className="text-xl font-bold text-gray-900 mb-3">6. Externer Dienst: OpenStreetMap / Nominatim (Geocoding)</h2>
             <p>
               Wenn Sie im Generator-Tool den Tab „Karte" öffnen, werden die Gastgeber-Adressen aus
               Ihrem Dinner-Plan zur Umwandlung in geografische Koordinaten (Geocoding) an den
@@ -100,7 +142,18 @@ export default function DatenschutzPage() {
           </section>
 
           <section>
-            <h2 className="text-xl font-bold text-gray-900 mb-3">6. Ihre Rechte gemäß DSGVO</h2>
+            <h2 className="text-xl font-bold text-gray-900 mb-3">7. Weitere clientseitige Funktionen</h2>
+            <p>Folgende Funktionen verarbeiten Daten ausschließlich lokal – es findet kein Datentransfer statt:</p>
+            <ul className="mt-3 list-disc pl-5 space-y-1 text-sm">
+              <li><strong>Kalender-Einladungen (.ics):</strong> Werden direkt im Browser generiert und lokal gespeichert. Es werden keine Daten übertragen.</li>
+              <li><strong>Sprachumschaltung (Deutsch / Englisch):</strong> Rein clientseitig per React-State. Keine zusätzliche Datenverarbeitung.</li>
+              <li><strong>mailto-Links:</strong> Beim Klick auf „Mail öffnen" wird Ihre native Mail-App geöffnet. Die Nachricht wird direkt von Ihrem Gerät versendet, nicht über unsere Server.</li>
+              <li><strong>CSV-Import und CSV-Export:</strong> Werden vollständig im Browser verarbeitet.</li>
+            </ul>
+          </section>
+
+          <section>
+            <h2 className="text-xl font-bold text-gray-900 mb-3">8. Ihre Rechte gemäß DSGVO</h2>
             <p>Sie haben gegenüber dem Verantwortlichen folgende Rechte:</p>
             <ul className="mt-3 list-disc pl-5 space-y-1 text-sm">
               <li><strong>Auskunftsrecht</strong> (Art.&nbsp;15 DSGVO): Sie können Auskunft über die zu Ihrer Person gespeicherten Daten verlangen.</li>
@@ -112,14 +165,14 @@ export default function DatenschutzPage() {
               <li><strong>Recht auf Beschwerde</strong> bei einer Aufsichtsbehörde (Art.&nbsp;77 DSGVO)</li>
             </ul>
             <p className="mt-3 text-sm">
-              Da diese Anwendung keine personenbezogenen Daten auf Servern speichert, liegt für die
-              meisten Rechte kein Anwendungsfall vor. Für Anfragen wenden Sie sich bitte per E-Mail an
+              Für Anfragen bezüglich Ihrer gespeicherten Daten wenden Sie sich bitte an den Organisator Ihres Events
+              oder per E-Mail an
               {' '}<a href="mailto:lorenz_nitsch@hotmail.de" className="underline" style={{ color: ACCENT }}>lorenz_nitsch@hotmail.de</a>.
             </p>
           </section>
 
           <section>
-            <h2 className="text-xl font-bold text-gray-900 mb-3">7. Beschwerderecht bei der Aufsichtsbehörde</h2>
+            <h2 className="text-xl font-bold text-gray-900 mb-3">9. Beschwerderecht bei der Aufsichtsbehörde</h2>
             <p>
               Sie haben das Recht, sich bei einer Datenschutz-Aufsichtsbehörde über die Verarbeitung
               Ihrer personenbezogenen Daten zu beschweren. Die zuständige Aufsichtsbehörde in Berlin ist:
@@ -132,7 +185,7 @@ export default function DatenschutzPage() {
           </section>
 
           <section>
-            <h2 className="text-xl font-bold text-gray-900 mb-3">8. Aktualität und Änderungen</h2>
+            <h2 className="text-xl font-bold text-gray-900 mb-3">10. Aktualität und Änderungen</h2>
             <p>
               Diese Datenschutzerklärung ist aktuell gültig. Durch die Weiterentwicklung der Website
               oder aufgrund geänderter gesetzlicher bzw. behördlicher Vorgaben kann es notwendig werden,
@@ -150,7 +203,8 @@ export default function DatenschutzPage() {
             <span>🍽️</span>
             <span>Running Dinner Generator</span>
           </div>
-          <div className="flex gap-6 text-sm">
+          <div className="flex gap-6 text-sm flex-wrap justify-center">
+            <Link to="/fuer-gaeste" className="hover:text-white transition-colors">Für Gäste</Link>
             <Link to="/datenschutz" className="hover:text-white transition-colors">Datenschutz</Link>
             <a href="https://github.com/lorenznitsch/running-dinner" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">GitHub</a>
             <a href="mailto:lorenz_nitsch@hotmail.de" className="hover:text-white transition-colors">Kontakt</a>

@@ -13,13 +13,18 @@ function Navbar() {
           <span style={{ color: ACCENT }}>🍽️</span>
           <span>Running Dinner</span>
         </Link>
-        <Link
-          to="/tool"
-          className="px-5 py-2 rounded-lg font-semibold text-white text-sm transition-opacity hover:opacity-90"
-          style={{ backgroundColor: ACCENT }}
-        >
-          Jetzt starten
-        </Link>
+        <div className="flex items-center gap-4">
+          <Link to="/fuer-gaeste" className="text-sm font-medium text-gray-500 hover:text-gray-900 transition-colors hidden sm:block">
+            Für Gäste
+          </Link>
+          <Link
+            to="/tool"
+            className="px-5 py-2 rounded-lg font-semibold text-white text-sm transition-opacity hover:opacity-90"
+            style={{ backgroundColor: ACCENT }}
+          >
+            Jetzt starten
+          </Link>
+        </div>
       </div>
     </nav>
   )
@@ -47,21 +52,15 @@ function Hero() {
             className="px-7 py-3 rounded-xl font-semibold text-white text-base transition-opacity hover:opacity-90 shadow-md"
             style={{ backgroundColor: ACCENT }}
           >
-            ✨ Neue Umfrage erstellen
+            ✨ Umfrage erstellen & starten
           </button>
           <Link
-            to="/tool"
+            to="/fuer-gaeste"
             className="px-7 py-3 rounded-xl font-semibold text-gray-700 text-base border border-gray-200 bg-white hover:bg-gray-50 transition-colors"
           >
-            CSV hochladen & starten
+            Als Gast teilnehmen →
           </Link>
         </div>
-        <p className="text-xs text-gray-400 mt-5">
-          Lieber Google Forms?{' '}
-          <a href={FORMS_URL} target="_blank" rel="noopener noreferrer" className="underline hover:text-gray-600 transition-colors">
-            Template herunterladen
-          </a>
-        </p>
       </div>
       {showModal && <CreateSurveyModal onClose={() => setShowModal(false)} />}
     </section>
@@ -240,18 +239,18 @@ function HowItWorks() {
   const steps = [
     {
       icon: '📋',
+      title: 'Umfrage erstellen',
+      desc: 'Klicke auf „Umfrage erstellen", gib Datum und Uhrzeit ein – fertig. Du erhältst einen Teilnehmer-Link zum Teilen und einen Admin-Link nur für dich.',
+    },
+    {
+      icon: '📬',
       title: 'Anmeldungen sammeln',
-      desc: 'Teile das Google Forms Template mit deinen Gästen. Alle Daten – Namen, Adresse, Ernährung, Allergien – landen automatisch in einer CSV-Datei.',
+      desc: 'Deine Gäste füllen das Formular direkt online aus – Namen, Adresse, Ernährung, Allergien. Alles landet automatisch in deiner Admin-Ansicht.',
     },
     {
-      icon: '⬆️',
-      title: 'CSV importieren',
-      desc: 'Lade die exportierte CSV-Datei in den Generator. Die Spalten werden automatisch erkannt, der Plan wird sofort erstellt.',
-    },
-    {
-      icon: '💬',
-      title: 'Nachrichten versenden',
-      desc: 'Jedes Team bekommt eine fertige WhatsApp-Nachricht mit Adressen, Uhrzeiten und allen Infos – einfach kopieren und senden.',
+      icon: '🎲',
+      title: 'Plan generieren & versenden',
+      desc: 'Ein Klick genügt: Der Algorithmus erstellt den optimalen Dinner-Plan. Du bekommst fertige Nachrichten pro Team – per Mail oder WhatsApp versenden.',
     },
   ]
 
@@ -336,12 +335,12 @@ function FAQ() {
       a: 'Beim Running Dinner melden sich Gruppen von je 2–3 Personen an. Das Abendessen wird in drei Gänge aufgeteilt (Vorspeise, Hauptspeise, Nachspeise). Pro Gang essen jeweils 3 Teams zusammen – die Teams werden nach jedem Gang neu gemischt, sodass jeder Gang an einem anderen Ort mit anderen Personen stattfindet. Zur Nachspeise kommen alle gemeinsam an einem Ort zusammen.',
     },
     {
-      q: 'Welches Template nutze ich für Google Forms?',
-      a: 'Lade das Template über den Button auf dieser Seite herunter. Es enthält alle nötigen Felder: Namen, Adresse, Klingelschild, Ernährung (vegan/vegetarisch/omnivor) und Allergien. Kopiere das Template in deinen Google Drive und teile den Link mit deinen Gästen.',
+      q: 'Werden meine Daten gespeichert?',
+      a: 'Anmeldedaten (Namen, Adressen, E-Mails) werden in einer sicheren Datenbank (Supabase, Server in der EU) gespeichert, damit du als Organisator jederzeit Zugriff hast. Die Daten werden nur für dieses Event genutzt. Mehr dazu in der Datenschutzerklärung.',
     },
     {
-      q: 'Werden meine Daten gespeichert?',
-      a: 'Nein. Alle Daten werden ausschließlich lokal in deinem Browser verarbeitet. Es findet kein Upload auf externe Server statt. Wenn du den Tab schließt, sind alle Daten weg.',
+      q: 'Kann ich auch Google Forms verwenden?',
+      a: 'Ja, als Alternative kannst du Anmeldedaten per CSV-Datei importieren. Lade einfach den Generator ohne Umfrage und importiere deine eigene CSV. Für die meisten Fälle empfehlen wir aber die eingebaute Umfrage – einfacher und alles an einem Ort.',
     },
     {
       q: 'Wie viele Teams sind möglich?',
@@ -393,12 +392,12 @@ function Footer() {
           <span>🍽️</span>
           <span>Running Dinner Generator</span>
         </div>
-        <div className="flex gap-6 text-sm">
+        <div className="flex gap-6 text-sm flex-wrap justify-center">
+          <Link to="/fuer-gaeste" className="hover:text-white transition-colors">Für Gäste</Link>
           <Link to="/datenschutz" className="hover:text-white transition-colors">Datenschutz</Link>
           <a href="https://github.com/lorenznitsch/running-dinner" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">GitHub</a>
           <a href="mailto:lorenz_nitsch@hotmail.de" className="hover:text-white transition-colors">Kontakt</a>
         </div>
-        <p className="text-xs text-gray-600">Alle Daten bleiben in deinem Browser.</p>
       </div>
     </footer>
   )

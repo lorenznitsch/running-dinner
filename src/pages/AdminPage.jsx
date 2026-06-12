@@ -89,11 +89,15 @@ export default function AdminPage() {
     const teams = responses.map((r, i) => ({
       id: i + 1,
       names: r.names,
+      email: r.email || '',
+      email2: r.email2 || '',
       diet: r.diet || 'omnivor',
       allergies: r.allergies || '',
       address: r.address || '',
       doorbell: r.doorbell || '',
       phone: r.phone || '',
+      phone1: r.phone1 || r.phone || '',
+      phone2: r.phone2 || '',
     }))
     navigate('/tool', { state: { teams } })
   }
@@ -267,7 +271,8 @@ export default function AdminPage() {
                         <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">{r.names}</td>
                         <td className="px-4 py-3 text-blue-600 text-xs whitespace-nowrap">
                           {r.email
-                            ? <a href={`mailto:${r.email}`} className="underline hover:text-blue-800">{r.email}</a>
+                            ? <><a href={`mailto:${r.email}`} className="underline hover:text-blue-800">{r.email}</a>
+                               {r.email2 && <><br/><a href={`mailto:${r.email2}`} className="underline hover:text-blue-800 text-gray-400">{r.email2}</a></>}</>
                             : <span className="text-gray-300">–</span>}
                         </td>
                         <td className="px-4 py-3">

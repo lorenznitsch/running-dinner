@@ -4,15 +4,143 @@ import { supabase } from '../lib/supabase'
 
 const ACCENT = '#1D9E75'
 
+// ── Translations ──────────────────────────────────────────────────────────────
+const T = {
+  de: {
+    loading: 'Lade Umfrage…',
+    notFound: 'Umfrage nicht gefunden',
+    notFoundSub: 'Diese Umfrage existiert nicht oder wurde gelöscht.',
+    backHome: '← Zur Startseite',
+    thankYou: 'Danke!',
+    submitted: 'Eure Anmeldung ist eingegangen.',
+    submittedSub: 'Wir freuen uns auf euch!',
+    submittedEvent: name => `Wir freuen uns auf euch beim „${name}"!`,
+    planNote: '✅ Ihr werdet rechtzeitig euren persönlichen Dinner-Plan erhalten.',
+    title: 'Running Dinner – Anmeldung',
+    introText: 'Fülle das Formular aus, um euch für das Running Dinner anzumelden. Alle Felder mit * sind Pflichtfelder.',
+    howTitle: 'So funktioniert das Running Dinner:',
+    howItems: [
+      '🍽️ Ihr nehmt als Zweiergruppe teil und bereitet entweder eine Vorspeise, Hauptspeise oder Nachspeise für 6 Personen zu (der Gang wird ausgelost).',
+      '👥 Pro Gang essen jeweils 3 Gruppen (6 Personen) gemeinsam.',
+      '🔄 Die Gruppen werden nach jedem Gang neu gemischt – jeder Gang findet also an einem anderen Ort und mit anderen Personen statt.',
+      '🍰 Zum Dessert kommen alle Teilnehmenden an einem gemeinsamen Ort zusammen.',
+      '⚠️ Mit dem Ausfüllen des Formulars gebt ihr eine verbindliche Zusage zur Teilnahme ab.',
+    ],
+    names: 'Eure Namen',
+    namesPlaceholder: 'z.B. Tim & Anna',
+    email1: 'E-Mail-Adresse Gast 1',
+    email1Placeholder: 'beispiel@email.de',
+    email2: 'E-Mail-Adresse Gast 2',
+    email2Placeholder: 'partner@email.de',
+    phone1: 'Handynummer Gast 1',
+    phone1Placeholder: '0151 12345678',
+    phone2: 'Handynummer Gast 2',
+    phone2Placeholder: '0172 87654321',
+    diet: 'Ernährung',
+    dietOptions: [
+      { val: 'omnivor',     emoji: '🥩', label: 'Omnivor',     desc: 'Alles' },
+      { val: 'vegetarisch', emoji: '🥦', label: 'Vegetarisch', desc: 'Kein Fleisch' },
+      { val: 'vegan',       emoji: '🌱', label: 'Vegan',       desc: 'Pflanzlich' },
+    ],
+    allergies: 'Allergien oder Unverträglichkeiten',
+    allergiesPlaceholder: 'z.B. Laktose, Nüsse, Gluten',
+    addr1Title: 'Host-Adresse 1',
+    addr2Title: 'Host-Adresse 2',
+    addr2Sub: 'optional – falls ihr zwei mögliche Locations habt',
+    street: 'Straße',
+    streetPlaceholder: 'Musterstraße',
+    nr: 'Nr.',
+    nrPlaceholder: '12',
+    plz: 'PLZ',
+    plzPlaceholder: '10115',
+    city: 'Ort',
+    cityPlaceholder: 'Berlin',
+    doorbell: 'Klingelschild',
+    doorbellPlaceholder: 'z.B. Müller / Schmidt',
+    notes: 'Noch etwas mitteilen?',
+    notesPlaceholder: 'Sonstige Hinweise für die Organisatoren…',
+    required: '',
+    optional: '(optional)',
+    errorRequired: 'Bitte fülle alle Pflichtfelder aus.',
+    errorSave: 'Fehler beim Speichern: ',
+    submitBtn: '✅ Jetzt verbindlich anmelden',
+    submitting: '⏳ Wird gespeichert…',
+    privacyNote: 'Deine Daten werden nur zur Organisation dieses Running Dinners verwendet und nicht an Dritte weitergegeben.',
+    privacy: 'Datenschutz',
+  },
+  en: {
+    loading: 'Loading survey…',
+    notFound: 'Survey not found',
+    notFoundSub: 'This survey does not exist or has been deleted.',
+    backHome: '← Back to home',
+    thankYou: 'Thank you!',
+    submitted: 'Your registration has been received.',
+    submittedSub: 'We look forward to seeing you!',
+    submittedEvent: name => `We look forward to seeing you at "${name}"!`,
+    planNote: '✅ You will receive your personal dinner plan in due time.',
+    title: 'Running Dinner – Registration',
+    introText: 'Fill in the form to register for the Running Dinner. All fields marked with * are required.',
+    howTitle: 'How the Running Dinner works:',
+    howItems: [
+      '🍽️ You participate as a group of two and prepare either a starter, main course or dessert for 6 people (the course will be drawn by lot).',
+      '👥 Per course, 3 groups (6 people) eat together.',
+      '🔄 Groups are reshuffled after each course – so each course takes place at a different location with different people.',
+      '🍰 For dessert, all participants come together at one shared location.',
+      '⚠️ By submitting this form, you make a binding commitment to participate.',
+    ],
+    names: 'Your names',
+    namesPlaceholder: 'e.g. Tim & Anna',
+    email1: 'Email address guest 1',
+    email1Placeholder: 'example@email.com',
+    email2: 'Email address guest 2',
+    email2Placeholder: 'partner@email.com',
+    phone1: 'Mobile number guest 1',
+    phone1Placeholder: '+49 151 12345678',
+    phone2: 'Mobile number guest 2',
+    phone2Placeholder: '+49 172 87654321',
+    diet: 'Diet',
+    dietOptions: [
+      { val: 'omnivor',     emoji: '🥩', label: 'Omnivore',    desc: 'Everything' },
+      { val: 'vegetarisch', emoji: '🥦', label: 'Vegetarian',  desc: 'No meat' },
+      { val: 'vegan',       emoji: '🌱', label: 'Vegan',       desc: 'Plant-based' },
+    ],
+    allergies: 'Allergies or intolerances',
+    allergiesPlaceholder: 'e.g. lactose, nuts, gluten',
+    addr1Title: 'Host address 1',
+    addr2Title: 'Host address 2',
+    addr2Sub: 'optional – if you have two possible locations',
+    street: 'Street',
+    streetPlaceholder: 'Example Street',
+    nr: 'No.',
+    nrPlaceholder: '12',
+    plz: 'Postcode',
+    plzPlaceholder: '10115',
+    city: 'City',
+    cityPlaceholder: 'Berlin',
+    doorbell: 'Doorbell name',
+    doorbellPlaceholder: 'e.g. Smith / Jones',
+    notes: 'Anything else to add?',
+    notesPlaceholder: 'Other notes for the organisers…',
+    required: '',
+    optional: '(optional)',
+    errorRequired: 'Please fill in all required fields.',
+    errorSave: 'Error saving: ',
+    submitBtn: '✅ Register now (binding)',
+    submitting: '⏳ Saving…',
+    privacyNote: 'Your data will only be used to organise this Running Dinner and will not be passed on to third parties.',
+    privacy: 'Privacy policy',
+  },
+}
+
 // ── Reusable input ────────────────────────────────────────────────────────────
-function Field({ label, required, children }) {
+function Field({ label, required, optional, children }) {
   return (
     <div>
       <label className="block text-sm font-semibold text-gray-700 mb-2">
         {label}{' '}
         {required
           ? <span className="text-red-400">*</span>
-          : <span className="text-gray-400 font-normal">(optional)</span>}
+          : <span className="text-gray-400 font-normal">{optional}</span>}
       </label>
       {children}
     </div>
@@ -22,81 +150,53 @@ function Field({ label, required, children }) {
 const inputCls =
   'w-full border border-gray-200 rounded-xl px-4 py-3 text-gray-900 placeholder-gray-300 focus:outline-none focus:ring-2 focus:ring-green-300'
 
-// ── Address block (reused for addr1 + addr2) ──────────────────────────────────
-function AddressBlock({ prefix, form, set, required }) {
+// ── Address block ─────────────────────────────────────────────────────────────
+function AddressBlock({ prefix, form, set, required, t }) {
   return (
     <div className="space-y-3">
-      {/* Straße + Hausnummer */}
       <div className="grid grid-cols-3 gap-3">
         <div className="col-span-2">
           <label className="block text-xs font-semibold text-gray-500 mb-1">
-            Straße{required && <span className="text-red-400 ml-0.5">*</span>}
+            {t.street}{required && <span className="text-red-400 ml-0.5">*</span>}
           </label>
-          <input
-            type="text"
-            placeholder="Musterstraße"
-            value={form[`${prefix}street`]}
-            onChange={e => set(`${prefix}street`, e.target.value)}
-            required={required}
-            className={inputCls}
-          />
+          <input type="text" placeholder={t.streetPlaceholder}
+            value={form[`${prefix}street`]} onChange={e => set(`${prefix}street`, e.target.value)}
+            required={required} className={inputCls} />
         </div>
         <div>
           <label className="block text-xs font-semibold text-gray-500 mb-1">
-            Nr.{required && <span className="text-red-400 ml-0.5">*</span>}
+            {t.nr}{required && <span className="text-red-400 ml-0.5">*</span>}
           </label>
-          <input
-            type="text"
-            placeholder="12"
-            value={form[`${prefix}housenumber`]}
-            onChange={e => set(`${prefix}housenumber`, e.target.value)}
-            required={required}
-            className={inputCls}
-          />
+          <input type="text" placeholder={t.nrPlaceholder}
+            value={form[`${prefix}housenumber`]} onChange={e => set(`${prefix}housenumber`, e.target.value)}
+            required={required} className={inputCls} />
         </div>
       </div>
-      {/* PLZ + Ort */}
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className="block text-xs font-semibold text-gray-500 mb-1">
-            PLZ{required && <span className="text-red-400 ml-0.5">*</span>}
+            {t.plz}{required && <span className="text-red-400 ml-0.5">*</span>}
           </label>
-          <input
-            type="text"
-            placeholder="10115"
-            value={form[`${prefix}zip`]}
-            onChange={e => set(`${prefix}zip`, e.target.value)}
-            required={required}
-            className={inputCls}
-          />
+          <input type="text" placeholder={t.plzPlaceholder}
+            value={form[`${prefix}zip`]} onChange={e => set(`${prefix}zip`, e.target.value)}
+            required={required} className={inputCls} />
         </div>
         <div>
           <label className="block text-xs font-semibold text-gray-500 mb-1">
-            Ort{required && <span className="text-red-400 ml-0.5">*</span>}
+            {t.city}{required && <span className="text-red-400 ml-0.5">*</span>}
           </label>
-          <input
-            type="text"
-            placeholder="Berlin"
-            value={form[`${prefix}city`]}
-            onChange={e => set(`${prefix}city`, e.target.value)}
-            required={required}
-            className={inputCls}
-          />
+          <input type="text" placeholder={t.cityPlaceholder}
+            value={form[`${prefix}city`]} onChange={e => set(`${prefix}city`, e.target.value)}
+            required={required} className={inputCls} />
         </div>
       </div>
-      {/* Klingelschild */}
       <div>
         <label className="block text-xs font-semibold text-gray-500 mb-1">
-          Klingelschild{required && <span className="text-red-400 ml-0.5">*</span>}
+          {t.doorbell}{required && <span className="text-red-400 ml-0.5">*</span>}
         </label>
-        <input
-          type="text"
-          placeholder="z.B. Müller / Schmidt"
-          value={form[`${prefix}doorbell`]}
-          onChange={e => set(`${prefix}doorbell`, e.target.value)}
-          required={required}
-          className={inputCls}
-        />
+        <input type="text" placeholder={t.doorbellPlaceholder}
+          value={form[`${prefix}doorbell`]} onChange={e => set(`${prefix}doorbell`, e.target.value)}
+          required={required} className={inputCls} />
       </div>
     </div>
   )
@@ -111,26 +211,19 @@ export default function SurveyPage() {
   const [submitted, setSubmitted] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [lang, setLang] = useState('de')
+  const t = T[lang]
 
   const [form, setForm] = useState({
     names: '',
-    email: '',
+    email1: '',
+    email2: '',
     phone1: '',
     phone2: '',
     diet: 'omnivor',
     allergies: '',
-    // Address 1 (required)
-    a1street: '',
-    a1housenumber: '',
-    a1zip: '',
-    a1city: 'Berlin',
-    a1doorbell: '',
-    // Address 2 (optional)
-    a2street: '',
-    a2housenumber: '',
-    a2zip: '',
-    a2city: 'Berlin',
-    a2doorbell: '',
+    a1street: '', a1housenumber: '', a1zip: '', a1city: 'Berlin', a1doorbell: '',
+    a2street: '', a2housenumber: '', a2zip: '', a2city: 'Berlin', a2doorbell: '',
     notes: '',
   })
   const set = (key, val) => setForm(f => ({ ...f, [key]: val }))
@@ -139,7 +232,7 @@ export default function SurveyPage() {
     async function checkSurvey() {
       const { data, error } = await supabase
         .from('surveys')
-        .select('id, event_name')
+        .select('id, event_name, event_date, time_starter')
         .eq('id', surveyId)
         .maybeSingle()
       if (error || !data) setNotFound(true)
@@ -151,17 +244,15 @@ export default function SurveyPage() {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    // Manual required check for fields not covered by HTML (radio etc.)
-    if (!form.names.trim() || !form.email.trim() || !form.phone1.trim()
+    if (!form.names.trim() || !form.email1.trim() || !form.phone1.trim()
       || !form.a1street.trim() || !form.a1housenumber.trim()
       || !form.a1zip.trim() || !form.a1city.trim() || !form.a1doorbell.trim()) {
-      setError('Bitte fülle alle Pflichtfelder aus.')
+      setError(t.errorRequired)
       return
     }
     setLoading(true)
     setError('')
 
-    // Compose address strings for existing plan/map logic
     const address1 = `${form.a1street.trim()} ${form.a1housenumber.trim()}, ${form.a1zip.trim()} ${form.a1city.trim()}`
     const hasAddr2 = form.a2street.trim() && form.a2housenumber.trim()
     const address2 = hasAddr2
@@ -172,48 +263,58 @@ export default function SurveyPage() {
       const { error: dbError } = await supabase.from('responses').insert({
         survey_id: surveyId,
         names: form.names.trim(),
-        email: form.email.trim(),
-        phone: form.phone1.trim(),       // keep legacy column for algorithm compat
+        email: form.email1.trim(),       // legacy column
+        email2: form.email2.trim() || null,
+        phone: form.phone1.trim(),       // legacy column
         phone1: form.phone1.trim(),
         phone2: form.phone2.trim() || null,
         diet: form.diet,
         allergies: form.allergies.trim() || null,
-        // Legacy single address field (used by plan/map algorithms)
         address: address1,
         doorbell: form.a1doorbell.trim(),
-        // Structured address 1
-        street1: form.a1street.trim(),
-        housenumber1: form.a1housenumber.trim(),
-        zip1: form.a1zip.trim(),
-        city1: form.a1city.trim(),
-        doorbell1: form.a1doorbell.trim(),
-        // Structured address 2
-        street2: form.a2street.trim() || null,
-        housenumber2: form.a2housenumber.trim() || null,
-        zip2: form.a2zip.trim() || null,
-        city2: form.a2city.trim() || null,
+        street1: form.a1street.trim(), housenumber1: form.a1housenumber.trim(),
+        zip1: form.a1zip.trim(), city1: form.a1city.trim(), doorbell1: form.a1doorbell.trim(),
+        street2: form.a2street.trim() || null, housenumber2: form.a2housenumber.trim() || null,
+        zip2: form.a2zip.trim() || null, city2: form.a2city.trim() || null,
         doorbell2: form.a2doorbell.trim() || null,
-        // Composed address 2 string
         ...(address2 ? { address2 } : {}),
         notes: form.notes.trim() || null,
       })
       if (dbError) throw new Error(dbError.message)
       setSubmitted(true)
     } catch (err) {
-      setError('Fehler beim Speichern: ' + err.message)
+      setError(t.errorSave + err.message)
     } finally {
       setLoading(false)
     }
   }
 
-  // ── Loading / Not found / Success states ──────────────────────────────────
+  // ── Event date display helper ─────────────────────────────────────────────
+  const eventDateLine = (() => {
+    if (!survey?.event_date && !survey?.time_starter) return null
+    const parts = []
+    if (survey.event_date) {
+      const d = new Date(survey.event_date + 'T12:00:00')
+      parts.push(lang === 'de'
+        ? `am ${d.toLocaleDateString('de-DE', { day: 'numeric', month: 'long', year: 'numeric' })}`
+        : `on ${d.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}`)
+    }
+    if (survey.time_starter) {
+      parts.push(lang === 'de'
+        ? `Start um ${survey.time_starter}`
+        : `starting at ${survey.time_starter}`)
+    }
+    return parts.join(' – ')
+  })()
+
+  // ── States ────────────────────────────────────────────────────────────────
 
   if (checking) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center text-gray-400">
           <div className="text-4xl mb-3 animate-pulse">🍽️</div>
-          <p>Lade Umfrage…</p>
+          <p>{t.loading}</p>
         </div>
       </div>
     )
@@ -224,9 +325,9 @@ export default function SurveyPage() {
       <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
         <div className="text-center max-w-sm">
           <div className="text-5xl mb-4">😕</div>
-          <h1 className="text-2xl font-bold text-gray-900 mb-3">Umfrage nicht gefunden</h1>
-          <p className="text-gray-500 mb-6">Diese Umfrage existiert nicht oder wurde gelöscht.</p>
-          <Link to="/" className="text-sm font-semibold" style={{ color: ACCENT }}>← Zur Startseite</Link>
+          <h1 className="text-2xl font-bold text-gray-900 mb-3">{t.notFound}</h1>
+          <p className="text-gray-500 mb-6">{t.notFoundSub}</p>
+          <Link to="/" className="text-sm font-semibold" style={{ color: ACCENT }}>{t.backHome}</Link>
         </div>
       </div>
     )
@@ -237,15 +338,13 @@ export default function SurveyPage() {
       <div className="min-h-screen bg-gradient-to-b from-green-50 to-white flex items-center justify-center px-4">
         <div className="text-center max-w-sm">
           <div className="text-6xl mb-5">🎉</div>
-          <h1 className="text-3xl font-bold text-gray-900 mb-3">Danke!</h1>
-          <p className="text-lg text-gray-600 mb-2">Eure Anmeldung ist eingegangen.</p>
+          <h1 className="text-3xl font-bold text-gray-900 mb-3">{t.thankYou}</h1>
+          <p className="text-lg text-gray-600 mb-2">{t.submitted}</p>
           <p className="text-gray-400 text-sm">
-            {survey?.event_name
-              ? `Wir freuen uns auf euch beim „${survey.event_name}"!`
-              : 'Wir freuen uns auf euch!'}
+            {survey?.event_name ? t.submittedEvent(survey.event_name) : t.submittedSub}
           </p>
           <div className="mt-8 p-4 bg-green-50 border border-green-200 rounded-xl text-sm text-green-800">
-            ✅ Ihr werdet rechtzeitig euren persönlichen Dinner-Plan erhalten.
+            {t.planNote}
           </div>
         </div>
       </div>
@@ -259,89 +358,89 @@ export default function SurveyPage() {
       {/* Header */}
       <div style={{ backgroundColor: ACCENT }} className="py-10 px-4 text-center text-white">
         <div className="text-3xl mb-3">🍽️</div>
-        <h1 className="text-2xl font-bold mb-1">Running Dinner – Anmeldung</h1>
+        <h1 className="text-2xl font-bold mb-1">{t.title}</h1>
         {survey?.event_name && (
           <p className="text-green-100 text-sm mt-1">{survey.event_name}</p>
         )}
+        {eventDateLine && (
+          <p className="text-green-200 text-xs mt-1">{eventDateLine}</p>
+        )}
       </div>
 
-      <div className="max-w-lg mx-auto px-4 py-10">
+      {/* Language toggle */}
+      <div className="max-w-lg mx-auto px-4 pt-6 flex justify-end gap-2">
+        {['de', 'en'].map(l => (
+          <button
+            key={l}
+            onClick={() => setLang(l)}
+            className="px-3 py-1.5 rounded-lg text-sm font-semibold border transition-all"
+            style={lang === l
+              ? { backgroundColor: ACCENT, color: 'white', borderColor: ACCENT }
+              : { backgroundColor: 'white', color: '#374151', borderColor: '#d1d5db' }}
+          >
+            {l === 'de' ? '🇩🇪 Deutsch' : '🇬🇧 English'}
+          </button>
+        ))}
+      </div>
+
+      <div className="max-w-lg mx-auto px-4 py-6">
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8">
 
-          {/* ── Info box ──────────────────────────────────────────────────── */}
+          {/* ── Info box ── */}
           <div className="bg-green-50 border border-green-200 rounded-xl p-5 mb-8 space-y-3">
             <p className="text-sm text-gray-700 leading-relaxed">
-              Fülle das Formular aus, um euch für das Running Dinner anzumelden.
-              Alle Felder mit <span className="text-red-500 font-semibold">*</span> sind Pflichtfelder.
+              {t.introText}
             </p>
-            <p className="text-sm font-semibold text-gray-800">So funktioniert das Running Dinner:</p>
+            <p className="text-sm font-semibold text-gray-800">{t.howTitle}</p>
             <ul className="space-y-2 text-sm text-gray-700 leading-relaxed">
-              <li>🍽️ Ihr nehmt als Zweiergruppe teil und bereitet entweder eine Vorspeise, Hauptspeise oder Nachspeise für 6 Personen zu (der Gang wird ausgelost).</li>
-              <li>👥 Pro Gang essen jeweils 3 Gruppen (6 Personen) gemeinsam.</li>
-              <li>🔄 Die Gruppen werden nach jedem Gang neu gemischt – jeder Gang findet also an einem anderen Ort und mit anderen Personen statt.</li>
-              <li>🍰 Zum Dessert kommen alle Teilnehmenden an einem gemeinsamen Ort zusammen.</li>
-              <li className="font-medium text-gray-800">⚠️ Mit dem Ausfüllen des Formulars gebt ihr eine verbindliche Zusage zur Teilnahme ab.</li>
+              {t.howItems.map((item, i) => (
+                <li key={i} className={i === 4 ? 'font-medium text-gray-800' : ''}>{item}</li>
+              ))}
             </ul>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-6">
 
             {/* Namen */}
-            <Field label="Eure Namen" required>
-              <input
-                type="text"
-                placeholder="z.B. Tim & Anna"
-                value={form.names}
-                onChange={e => set('names', e.target.value)}
-                required
-                className={inputCls}
-              />
+            <Field label={t.names} required optional={t.optional}>
+              <input type="text" placeholder={t.namesPlaceholder}
+                value={form.names} onChange={e => set('names', e.target.value)}
+                required className={inputCls} />
             </Field>
 
-            {/* E-Mail */}
-            <Field label="E-Mail-Adresse" required>
-              <input
-                type="email"
-                placeholder="beispiel@email.de"
-                value={form.email}
-                onChange={e => set('email', e.target.value)}
-                required
-                className={inputCls}
-              />
-            </Field>
+            {/* E-Mails */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <Field label={t.email1} required optional={t.optional}>
+                <input type="email" placeholder={t.email1Placeholder}
+                  value={form.email1} onChange={e => set('email1', e.target.value)}
+                  required className={inputCls} />
+              </Field>
+              <Field label={t.email2} required={false} optional={t.optional}>
+                <input type="email" placeholder={t.email2Placeholder}
+                  value={form.email2} onChange={e => set('email2', e.target.value)}
+                  className={inputCls} />
+              </Field>
+            </div>
 
             {/* Handynummern */}
             <div className="grid grid-cols-2 gap-3">
-              <Field label="Handynummer Gast 1" required>
-                <input
-                  type="tel"
-                  placeholder="0151 12345678"
-                  value={form.phone1}
-                  onChange={e => set('phone1', e.target.value)}
-                  required
-                  className={inputCls}
-                />
+              <Field label={t.phone1} required optional={t.optional}>
+                <input type="tel" placeholder={t.phone1Placeholder}
+                  value={form.phone1} onChange={e => set('phone1', e.target.value)}
+                  required className={inputCls} />
               </Field>
-              <Field label="Handynummer Gast 2" required={false}>
-                <input
-                  type="tel"
-                  placeholder="0172 87654321"
-                  value={form.phone2}
-                  onChange={e => set('phone2', e.target.value)}
-                  className={inputCls}
-                />
+              <Field label={t.phone2} required={false} optional={t.optional}>
+                <input type="tel" placeholder={t.phone2Placeholder}
+                  value={form.phone2} onChange={e => set('phone2', e.target.value)}
+                  className={inputCls} />
               </Field>
             </div>
 
             {/* Ernährung */}
             <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-3">Ernährung</label>
+              <label className="block text-sm font-semibold text-gray-700 mb-3">{t.diet}</label>
               <div className="grid grid-cols-3 gap-3">
-                {[
-                  { val: 'omnivor',      emoji: '🥩', label: 'Omnivor',      desc: 'Alles' },
-                  { val: 'vegetarisch',  emoji: '🥦', label: 'Vegetarisch',  desc: 'Kein Fleisch' },
-                  { val: 'vegan',        emoji: '🌱', label: 'Vegan',        desc: 'Pflanzlich' },
-                ].map(opt => (
+                {t.dietOptions.map(opt => (
                   <label
                     key={opt.val}
                     className="cursor-pointer rounded-xl border-2 p-3 text-center transition-all"
@@ -362,55 +461,43 @@ export default function SurveyPage() {
             </div>
 
             {/* Allergien */}
-            <Field label="Allergien oder Unverträglichkeiten" required={false}>
-              <input
-                type="text"
-                placeholder="z.B. Laktose, Nüsse, Gluten"
-                value={form.allergies}
-                onChange={e => set('allergies', e.target.value)}
-                className={inputCls}
-              />
+            <Field label={t.allergies} required={false} optional={t.optional}>
+              <input type="text" placeholder={t.allergiesPlaceholder}
+                value={form.allergies} onChange={e => set('allergies', e.target.value)}
+                className={inputCls} />
             </Field>
 
             {/* Host-Adresse 1 */}
             <div>
               <div className="flex items-center gap-2 mb-3">
-                <span className="text-sm font-semibold text-gray-700">Host-Adresse 1</span>
+                <span className="text-sm font-semibold text-gray-700">{t.addr1Title}</span>
                 <span className="text-red-400 text-sm">*</span>
               </div>
               <div className="bg-gray-50 rounded-xl p-4 border border-gray-100">
-                <AddressBlock prefix="a1" form={form} set={set} required={true} />
+                <AddressBlock prefix="a1" form={form} set={set} required={true} t={t} />
               </div>
             </div>
 
             {/* Host-Adresse 2 */}
             <div>
               <div className="mb-3">
-                <span className="text-sm font-semibold text-gray-700">Host-Adresse 2 </span>
-                <span className="text-gray-400 text-sm font-normal">
-                  (optional) – falls ihr zwei mögliche Locations habt
-                </span>
+                <span className="text-sm font-semibold text-gray-700">{t.addr2Title} </span>
+                <span className="text-gray-400 text-sm font-normal">({t.addr2Sub})</span>
               </div>
               <div className="bg-gray-50 rounded-xl p-4 border border-gray-100">
-                <AddressBlock prefix="a2" form={form} set={set} required={false} />
+                <AddressBlock prefix="a2" form={form} set={set} required={false} t={t} />
               </div>
             </div>
 
             {/* Hinweis */}
-            <Field label="Noch etwas mitteilen?" required={false}>
-              <textarea
-                rows={3}
-                placeholder="Sonstige Hinweise für die Organisatoren…"
-                value={form.notes}
-                onChange={e => set('notes', e.target.value)}
-                className={`${inputCls} resize-none`}
-              />
+            <Field label={t.notes} required={false} optional={t.optional}>
+              <textarea rows={3} placeholder={t.notesPlaceholder}
+                value={form.notes} onChange={e => set('notes', e.target.value)}
+                className={`${inputCls} resize-none`} />
             </Field>
 
             {error && (
-              <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
-                {error}
-              </div>
+              <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{error}</div>
             )}
 
             <button
@@ -419,14 +506,13 @@ export default function SurveyPage() {
               className="w-full py-4 rounded-xl font-bold text-white text-base transition-opacity disabled:opacity-50"
               style={{ backgroundColor: ACCENT }}
             >
-              {loading ? '⏳ Wird gespeichert…' : '✅ Jetzt verbindlich anmelden'}
+              {loading ? t.submitting : t.submitBtn}
             </button>
           </form>
 
           <p className="text-xs text-gray-400 text-center mt-6 leading-relaxed">
-            Deine Daten werden nur zur Organisation dieses Running Dinners verwendet
-            und nicht an Dritte weitergegeben.{' '}
-            <Link to="/datenschutz" className="underline">Datenschutz</Link>
+            {t.privacyNote}{' '}
+            <Link to="/datenschutz" className="underline">{t.privacy}</Link>
           </p>
         </div>
       </div>

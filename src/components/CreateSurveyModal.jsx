@@ -39,8 +39,12 @@ function CopyLine({ label, value, hint }) {
   )
 }
 
+const inputCls = 'w-full border border-gray-200 rounded-xl px-4 py-3 text-gray-900 placeholder-gray-300 focus:outline-none focus:ring-2'
+
 export default function CreateSurveyModal({ onClose }) {
   const [eventName, setEventName] = useState('')
+  const [eventDate, setEventDate] = useState('')
+  const [timeStarter, setTimeStarter] = useState('18:00 Uhr')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [result, setResult] = useState(null)
@@ -48,6 +52,10 @@ export default function CreateSurveyModal({ onClose }) {
   const origin = window.location.origin
 
   const handleCreate = async () => {
+    if (!eventDate || !timeStarter.trim()) {
+      setError('Bitte Datum und Uhrzeit der Vorspeise angeben.')
+      return
+    }
     setLoading(true)
     setError('')
     try {
@@ -56,13 +64,20 @@ export default function CreateSurveyModal({ onClose }) {
 
       const { error: dbError } = await supabase
         .from('surveys')
-        .insert({ id: surveyId, admin_token: adminToken, event_name: eventName || null })
+        .insert({
+          id: surveyId,
+          admin_token: adminToken,
+          event_name: eventName || null,
+          event_date: eventDate || null,
+          time_starter: timeStarter.trim() || null,
+        })
 
       if (dbError) throw new Error(dbError.message)
 
       setResult({
         surveyId,
         adminToken,
+        eventName,
         participantUrl: `${origin}/survey/${surveyId}`,
         adminUrl: `${origin}/admin/${surveyId}?token=${adminToken}`,
       })
@@ -92,20 +107,43 @@ export default function CreateSurveyModal({ onClose }) {
         <div className="px-6 py-6">
           {!result ? (
             <>
-              <div className="mb-6">
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Name deines Events <span className="text-gray-400 font-normal">(optional)</span>
-                </label>
-                <input
-                  type="text"
-                  placeholder="z.B. Running Dinner Prenzlauer Berg – Oktober 2025"
-                  value={eventName}
-                  onChange={e => setEventName(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && handleCreate()}
-                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-gray-900 placeholder-gray-300 focus:outline-none focus:ring-2"
-                  style={{ '--tw-ring-color': ACCENT }}
-                  autoFocus
-                />
+              <div className="space-y-4 mb-6">
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Name deines Events <span className="text-gray-400 font-normal">(optional)</span>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="z.B. Running Dinner Prenzlauer Berg"
+                    value={eventName}
+                    onChange={e => setEventName(e.target.value)}
+                    className={inputCls}
+                    autoFocus
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Event-Datum <span className="text-red-400">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    value={eventDate}
+                    onChange={e => setEventDate(e.target.value)}
+                    className={inputCls}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    Uhrzeit Vorspeise <span className="text-red-400">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="z.B. 18:00 Uhr"
+                    value={timeStarter}
+                    onChange={e => setTimeStarter(e.target.value)}
+                    className={inputCls}
+                  />
+                </div>
               </div>
 
               {error && (

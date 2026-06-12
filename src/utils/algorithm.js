@@ -215,7 +215,9 @@ export function buildMessage(team, plan, config) {
     ? `👩‍🍳 Bitte bereitet eine ${dietLabel} ${cookLabel}${allergyNote} für ca. ${personCount} Personen vor.`
     : `👩‍🍳 Bitte bereitet eine ${cookLabel}${allergyNote} für ca. ${personCount} Personen vor.`
 
-  const whatsappLine = whatsappLink ? `\n${whatsappLink}` : ''
+  const broadcastLine = whatsappLink
+    ? `\nHier kannst du dem WhatsApp-Broadcast für das Running Dinner beitreten: ${whatsappLink}`
+    : ''
 
   return `Hi ${team.names} 👋
 Hier kommt euer persönlicher Plan für das Running Dinner am ${date} 🍽️
@@ -231,6 +233,6 @@ ${cookingLine}
 Leitet die Infos bitte noch an eure:n Partner:in weiter.
 Falls etwas schief läuft, meldet euch bei:
 ${contacts || 'Organisationsteam'}
-${whatsappLine}
+${broadcastLine}
 Wir freuen uns auf euch! 🎉`
 }
