@@ -5,6 +5,89 @@ import { jsPDF } from 'jspdf'
 import html2canvas from 'html2canvas'
 import { Document, Packer, Paragraph, TextRun, PageBreak, HeadingLevel } from 'docx'
 import { saveAs } from 'file-saver'
+import JSZip from 'jszip'
+import emailjs from '@emailjs/browser'
+
+// ─── ICS Calendar helper ──────────────────────────────────────────────────────
+function toIcsDate(dateStr, timeStr) {
+  // dateStr: "YYYY-MM-DD", timeStr: "HH:MM"
+  if (!dateStr || !timeStr) return null
+  const [y, m, d] = dateStr.split('-')
+  const [hh, mm] = timeStr.split(':')
+  return `${y}${m}${d}T${hh}${mm}00`
+}
+function addIcsMinutes(icsDate, minutes) {
+  if (!icsDate) return null
+  const dt = new Date(
+    parseInt(icsDate.slice(0,4)), parseInt(icsDate.slice(4,6))-1, parseInt(icsDate.slice(6,8)),
+    parseInt(icsDate.slice(9,11)), parseInt(icsDate.slice(11,13))
+  )
+  dt.setMinutes(dt.getMinutes() + minutes)
+  const pad = n => String(n).padStart(2,'0')
+  return `${dt.getFullYear()}${pad(dt.getMonth()+1)}${pad(dt.getDate())}T${pad(dt.getHours())}${pad(dt.getMinutes())}00`
+}
+function buildIcs(team, config, messageText) {
+  const { date, timeStarter, timeMain, timeDessert, dessertAddress } = config
+  const starterAddr = team.groups?.starter?.host?.address || ''
+  const mainAddr    = team.groups?.main?.host?.address    || ''
+  const uid = () => Math.random().toString(36).slice(2) + '@running-dinner'
+  const esc = s => String(s || '').replace(/\n/g, '\\n').replace(/,/g, '\\,').replace(/;/g, '\\;')
+
+  const events = [
+    {
+      summary: `Running Dinner – Vorspeise bei ${team.groups?.starter?.host?.names || 'Host'}`,
+      start: toIcsDate(date, timeStarter),
+      end:   addIcsMinutes(toIcsDate(date, timeStarter), 90),
+      location: starterAddr,
+    },
+    {
+      summary: `Running Dinner – Hauptspeise bei ${team.groups?.main?.host?.names || 'Host'}`,
+      start: toIcsDate(date, timeMain),
+      end:   addIcsMinutes(toIcsDate(date, timeMain), 90),
+      location: mainAddr,
+    },
+    {
+      summary: 'Running Dinner – Nachspeise (gemeinsam)',
+      start: toIcsDate(date, timeDessert),
+      end:   addIcsMinutes(toIcsDate(date, timeDessert), 120),
+      location: dessertAddress || '',
+    },
+  ]
+
+  const vevents = events.map(ev => [
+    'BEGIN:VEVENT',
+    `UID:${uid()}`,
+    `DTSTART:${ev.start || '19700101T000000'}`,
+    `DTEND:${ev.end   || '19700101T000000'}`,
+    `SUMMARY:${esc(ev.summary)}`,
+    `LOCATION:${esc(ev.location)}`,
+    `DESCRIPTION:${esc(messageText)}`,
+    'END:VEVENT',
+  ].join('\r\n')).join('\r\n')
+
+  return [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//Running Dinner Generator//DE',
+    'CALSCALE:GREGORIAN',
+    vevents,
+    'END:VCALENDAR',
+  ].join('\r\n')
+}
+
+// ─── Phone cleaner ────────────────────────────────────────────────────────────
+function cleanPhone(raw) {
+  return String(raw || '').replace(/[^\d+]/g, '').trim()
+}
+
+// ─── EmailJS localStorage keys ────────────────────────────────────────────────
+const LS_EMAILJS = 'rd_emailjs_config'
+function loadEmailJsConfig() {
+  try { return JSON.parse(localStorage.getItem(LS_EMAILJS)) || {} } catch { return {} }
+}
+function saveEmailJsConfig(cfg) {
+  localStorage.setItem(LS_EMAILJS, JSON.stringify(cfg))
+}
 
 const ACCENT = '#1D9E75'
 
@@ -371,6 +454,277 @@ function MapTab({ plan, config }) {
   )
 }
 
+// ─── MessagesTab ──────────────────────────────────────────────────────────────
+function MessagesTab({ messages, config, handleMessageDocx }) {
+  // ── EmailJS state ──
+  const [ejsCfg, setEjsCfg] = useState(loadEmailJsConfig)
+  const [ejsInput, setEjsInput] = useState({ serviceId: '', templateId: '', publicKey: '' })
+  const [ejsConfigured, setEjsConfigured] = useState(() => {
+    const c = loadEmailJsConfig()
+    return !!(c.serviceId && c.templateId && c.publicKey)
+  })
+  const [ejsEditing, setEjsEditing] = useState(false)
+  const [ejsTesting, setEjsTesting] = useState(false)
+  const [ejsTestResult, setEjsTestResult] = useState('')
+  const [ejsSending, setEjsSending] = useState(false)
+  const [ejsProgress, setEjsProgress] = useState(null) // { sent, total, errors }
+  const [ejsDone, setEjsDone] = useState(null)
+  const [testEmail, setTestEmail] = useState('')
+
+  const saveEjsCfg = () => {
+    if (!ejsInput.serviceId || !ejsInput.templateId || !ejsInput.publicKey) return
+    saveEmailJsConfig(ejsInput)
+    setEjsCfg(ejsInput)
+    setEjsConfigured(true)
+    setEjsEditing(false)
+    setEjsTestResult('')
+  }
+  const handleTest = async () => {
+    setEjsTesting(true); setEjsTestResult('')
+    try {
+      const cfg = ejsConfigured ? ejsCfg : ejsInput
+      await emailjs.send(cfg.serviceId, cfg.templateId, {
+        to_email: testEmail || 'test@example.com',
+        to_name: 'Test',
+        message: 'Das ist eine Test-Nachricht vom Running Dinner Generator. 🍽️',
+      }, cfg.publicKey)
+      setEjsTestResult('✅ Test-Mail erfolgreich gesendet!')
+    } catch (e) {
+      setEjsTestResult('❌ Fehler: ' + (e?.text || e?.message || JSON.stringify(e)))
+    } finally { setEjsTesting(false) }
+  }
+  const handleSendAll = async () => {
+    const teamsWithEmail = messages.filter(m => m.team.email)
+    if (!teamsWithEmail.length) { setEjsDone({ sent: 0, errors: messages.length }); return }
+    setEjsSending(true); setEjsProgress({ sent: 0, total: teamsWithEmail.length, errors: 0 }); setEjsDone(null)
+    let sent = 0, errors = 0
+    for (const { team, text } of teamsWithEmail) {
+      try {
+        await emailjs.send(ejsCfg.serviceId, ejsCfg.templateId, {
+          to_email: team.email,
+          to_name: team.names,
+          message: text,
+        }, ejsCfg.publicKey)
+        sent++
+      } catch { errors++ }
+      setEjsProgress({ sent: sent + errors, total: teamsWithEmail.length, errors })
+      await new Promise(r => setTimeout(r, 250)) // rate-limit
+    }
+    setEjsSending(false); setEjsDone({ sent, errors })
+  }
+  const handleSendOne = async (team, text) => {
+    if (!team.email) { alert('Kein E-Mail für dieses Team hinterlegt.'); return }
+    try {
+      await emailjs.send(ejsCfg.serviceId, ejsCfg.templateId, {
+        to_email: team.email, to_name: team.names, message: text,
+      }, ejsCfg.publicKey)
+      alert(`✅ Mail an ${team.email} gesendet!`)
+    } catch (e) { alert('❌ Fehler: ' + (e?.text || e?.message)) }
+  }
+
+  // ── WhatsApp state ──
+  const allPhones = messages.flatMap(({ team }) =>
+    [team.phone, team.phone1, team.phone2].filter(Boolean).map(cleanPhone).filter(p => p.length >= 6)
+  ).filter((p, i, arr) => arr.indexOf(p) === i) // dedupe
+  const phonesText = allPhones.join('\n')
+  const [phonesCopied, setPhonesCopied] = useState(false)
+  const copyPhones = async () => {
+    await navigator.clipboard.writeText(phonesText)
+    setPhonesCopied(true); setTimeout(() => setPhonesCopied(false), 2500)
+  }
+  const firstPhone = allPhones[0] || ''
+
+  // ── ICS / ZIP ──
+  const downloadIcs = (team, text) => {
+    const ics = buildIcs(team, config, text)
+    const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' })
+    const name = `running-dinner-${team.names.replace(/[^a-zA-Z0-9äöüÄÖÜ]/g, '_').slice(0,30)}.ics`
+    saveAs(blob, name)
+  }
+  const downloadAllIcs = async () => {
+    const zip = new JSZip()
+    messages.forEach(({ team, text }) => {
+      const ics = buildIcs(team, config, text)
+      const name = `${team.names.replace(/[^a-zA-Z0-9äöüÄÖÜ]/g, '_').slice(0,30)}.ics`
+      zip.file(name, ics)
+    })
+    const blob = await zip.generateAsync({ type: 'blob' })
+    saveAs(blob, 'running-dinner-kalender.zip')
+  }
+
+  const noDate = !config.date
+
+  return (
+    <div className="space-y-6">
+
+      {/* ── EmailJS Section ── */}
+      <div className="border border-gray-200 rounded-xl overflow-hidden">
+        <div className="px-5 py-4 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-lg">✉️</span>
+            <span className="font-semibold text-gray-900 text-sm">Mails verschicken</span>
+            {ejsConfigured && !ejsEditing && (
+              <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-green-100 text-green-700">verbunden</span>
+            )}
+          </div>
+          {ejsConfigured && !ejsEditing && (
+            <button onClick={() => { setEjsEditing(true); setEjsInput(ejsCfg) }} className="text-xs text-gray-400 hover:text-gray-700 underline">Einstellungen</button>
+          )}
+        </div>
+
+        <div className="px-5 py-4">
+          {(!ejsConfigured || ejsEditing) ? (
+            <div className="space-y-4">
+              <p className="text-xs text-gray-500 leading-relaxed">
+                Konfiguriere EmailJS um Nachrichten direkt aus dem Browser zu versenden.{' '}
+                <a href="https://www.emailjs.com/docs/" target="_blank" rel="noopener noreferrer" className="underline" style={{ color: ACCENT }}>Zur Anleitung →</a>
+                {' '}(Lies auch <strong>EMAILJS-SETUP.md</strong> im Projekt-Root.)
+              </p>
+              {[
+                { key: 'serviceId',  label: 'Service ID',   ph: 'service_xxxxxxx' },
+                { key: 'templateId', label: 'Template ID',  ph: 'template_xxxxxxx' },
+                { key: 'publicKey',  label: 'Public Key',   ph: 'xxxxxxxxxxxxxxx' },
+              ].map(({ key, label, ph }) => (
+                <div key={key}>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">{label}</label>
+                  <input
+                    type="text" placeholder={ph} value={ejsInput[key]}
+                    onChange={e => setEjsInput(p => ({ ...p, [key]: e.target.value }))}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-green-200"
+                  />
+                </div>
+              ))}
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Test-E-Mail-Adresse</label>
+                <input type="email" placeholder="deine@email.de" value={testEmail}
+                  onChange={e => setTestEmail(e.target.value)}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-200"
+                />
+              </div>
+              {ejsTestResult && <p className="text-xs">{ejsTestResult}</p>}
+              <div className="flex gap-2">
+                <button onClick={handleTest} disabled={ejsTesting}
+                  className="flex-1 py-2 rounded-lg text-xs font-semibold border border-gray-200 hover:bg-gray-50 disabled:opacity-50">
+                  {ejsTesting ? '⏳ Sende…' : '🧪 Verbindung testen'}
+                </button>
+                <button onClick={saveEjsCfg}
+                  className="flex-1 py-2 rounded-lg text-xs font-bold text-white disabled:opacity-40"
+                  style={{ backgroundColor: ACCENT }}
+                  disabled={!ejsInput.serviceId || !ejsInput.templateId || !ejsInput.publicKey}>
+                  💾 Speichern
+                </button>
+              </div>
+              {ejsEditing && <button onClick={() => setEjsEditing(false)} className="w-full text-xs text-gray-400 hover:text-gray-600">Abbrechen</button>}
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {ejsDone && (
+                <div className={`p-3 rounded-lg text-sm ${ejsDone.errors ? 'bg-yellow-50 border border-yellow-200 text-yellow-800' : 'bg-green-50 border border-green-200 text-green-800'}`}>
+                  ✅ {ejsDone.sent} Mail{ejsDone.sent !== 1 ? 's' : ''} gesendet{ejsDone.errors ? `, ❌ ${ejsDone.errors} fehlgeschlagen` : ''}
+                </div>
+              )}
+              {ejsProgress && ejsSending && (
+                <div className="space-y-2">
+                  <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                    <div className="h-full rounded-full transition-all" style={{ backgroundColor: ACCENT, width: `${(ejsProgress.sent / ejsProgress.total) * 100}%` }} />
+                  </div>
+                  <p className="text-xs text-gray-500 text-center">{ejsProgress.sent} von {ejsProgress.total} Mails gesendet…</p>
+                </div>
+              )}
+              <div className="flex gap-2">
+                <button onClick={handleSendAll} disabled={ejsSending}
+                  className="flex-1 py-2.5 rounded-lg text-sm font-bold text-white disabled:opacity-50 transition-opacity"
+                  style={{ backgroundColor: ACCENT }}>
+                  {ejsSending ? '⏳ Sende…' : `📨 Alle ${messages.length} Mails verschicken`}
+                </button>
+              </div>
+              {messages.some(m => !m.team.email) && (
+                <p className="text-xs text-orange-600">⚠️ {messages.filter(m => !m.team.email).length} Teams ohne E-Mail-Adresse – diese werden übersprungen.</p>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── WhatsApp Group Section ── */}
+      <div className="border border-gray-200 rounded-xl overflow-hidden">
+        <div className="px-5 py-4 bg-gray-50 border-b border-gray-200">
+          <div className="flex items-center gap-2">
+            <span className="text-lg">💬</span>
+            <span className="font-semibold text-gray-900 text-sm">WhatsApp-Gruppe erstellen</span>
+            <span className="text-xs text-gray-400">({allPhones.length} Nummern)</span>
+          </div>
+        </div>
+        <div className="px-5 py-4 space-y-4">
+          <textarea
+            readOnly value={phonesText}
+            rows={Math.min(allPhones.length, 8)}
+            className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-xs font-mono text-gray-700 bg-gray-50 resize-none focus:outline-none"
+          />
+          <div className="flex gap-2">
+            <button onClick={copyPhones}
+              className="flex-1 py-2.5 rounded-lg text-sm font-semibold border transition-colors"
+              style={{ borderColor: phonesCopied ? ACCENT : '#d1d5db', color: phonesCopied ? ACCENT : '#374151', backgroundColor: phonesCopied ? '#f0fdf6' : 'white' }}>
+              {phonesCopied ? '✅ Kopiert!' : '📋 Alle Nummern kopieren'}
+            </button>
+            {firstPhone && (
+              <a href={`https://wa.me/${firstPhone.replace(/^\+/, '')}`} target="_blank" rel="noopener noreferrer"
+                className="flex-1 py-2.5 rounded-lg text-sm font-semibold text-white text-center"
+                style={{ backgroundColor: '#25D366' }}>
+                📱 WhatsApp öffnen
+              </a>
+            )}
+          </div>
+          <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800 leading-relaxed">
+            💡 Öffne WhatsApp → Neue Gruppe → Kontakte einladen. Füge die kopierten Nummern manuell hinzu oder scanne den Gruppen-QR-Code.
+          </div>
+        </div>
+      </div>
+
+      {/* ── ZIP all ICS ── */}
+      <div className="flex gap-2">
+        <button onClick={downloadAllIcs}
+          className="flex-1 py-2.5 rounded-xl font-semibold text-sm border border-gray-200 hover:bg-gray-50 transition-colors">
+          📅 Alle Kalender-Einladungen als ZIP
+          {noDate && <span className="ml-1 text-orange-500 text-xs">(kein Datum)</span>}
+        </button>
+      </div>
+
+      {/* ── Per-team cards ── */}
+      <div className="space-y-4">
+        {messages.map(({ team, text }, i) => (
+          <div key={i} className="border border-gray-200 rounded-xl overflow-hidden">
+            <div className="flex flex-wrap items-center gap-2 px-4 py-3 bg-gray-50 border-b border-gray-200">
+              <span className="font-semibold text-gray-900 text-sm flex-1 min-w-0 truncate">{team.names}</span>
+              <div className="flex gap-1.5 flex-wrap">
+                <CopyButton text={text} />
+                <button onClick={() => downloadIcs(team, text)}
+                  className="text-xs px-3 py-1.5 rounded-lg font-semibold border border-gray-200 hover:bg-gray-50 text-gray-600 transition-colors">
+                  📅 .ics
+                </button>
+                {ejsConfigured && (
+                  <button onClick={() => handleSendOne(team, text)}
+                    className="text-xs px-3 py-1.5 rounded-lg font-semibold border text-white transition-colors"
+                    style={{ backgroundColor: ACCENT, borderColor: ACCENT }}
+                    title={team.email || 'Keine E-Mail'}>
+                    ✉️ {team.email ? 'Mail' : '—'}
+                  </button>
+                )}
+              </div>
+            </div>
+            <pre className="px-4 py-4 text-xs text-gray-600 whitespace-pre-wrap font-mono leading-relaxed">{text}</pre>
+          </div>
+        ))}
+      </div>
+
+      {/* ── DOCX Export ── */}
+      <button onClick={handleMessageDocx} className="w-full py-2.5 rounded-xl font-semibold text-sm border border-gray-200 hover:bg-gray-50 transition-colors">
+        📄 Alle Nachrichten als Word-Datei (.docx)
+      </button>
+    </div>
+  )
+}
+
 // ─── Step 4: Results ──────────────────────────────────────────────────────────
 function Step4({ plan, teams, config, onBack }) {
   const [tab, setTab] = useState('plan')
@@ -471,22 +825,11 @@ function Step4({ plan, teams, config, onBack }) {
       )}
 
       {tab === 'messages' && (
-        <div>
-          <div className="space-y-4">
-            {messages.map(({ team, text }, i) => (
-              <div key={i} className="border border-gray-200 rounded-xl overflow-hidden">
-                <div className="flex items-center justify-between px-4 py-3 bg-gray-50 border-b border-gray-200">
-                  <span className="font-semibold text-gray-900 text-sm">{team.names}</span>
-                  <CopyButton text={text} />
-                </div>
-                <pre className="px-4 py-4 text-xs text-gray-600 whitespace-pre-wrap font-mono leading-relaxed">{text}</pre>
-              </div>
-            ))}
-          </div>
-          <button onClick={handleMessageDocx} className="mt-5 w-full py-2.5 rounded-xl font-semibold text-sm border border-gray-200 hover:bg-gray-50 transition-colors">
-            📄 Alle Nachrichten als Word-Datei (.docx)
-          </button>
-        </div>
+        <MessagesTab
+          messages={messages}
+          config={config}
+          handleMessageDocx={handleMessageDocx}
+        />
       )}
 
       {tab === 'map' && (

@@ -136,8 +136,8 @@ function RunningDinnerExplainer() {
           <h2 className="text-3xl md:text-4xl font-bold text-gray-900 mb-4">
             Was ist ein Running Dinner?
           </h2>
-          <p className="text-gray-500 text-lg max-w-xl mx-auto">
-            Teams wandern durch die Stadt und teilen jeden Gang mit neuen Nachbarn.
+          <p className="text-gray-500 text-lg max-w-2xl mx-auto leading-relaxed">
+            Beim Running Dinner melden sich Gruppen von je 2–3 Personen an. Das Abendessen wird in drei Gänge aufgeteilt (Vorspeise, Hauptspeise, Nachspeise). Pro Gang essen jeweils 3 Teams zusammen – die Teams werden nach jedem Gang neu gemischt, sodass jeder Gang an einem anderen Ort mit anderen Personen stattfindet. Zur Nachspeise kommen alle gemeinsam an einem Ort zusammen.
           </p>
         </div>
 
