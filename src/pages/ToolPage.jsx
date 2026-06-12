@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { parseCSV, buildMessage } from '../utils/algorithm'
-import { geocodeAddresses, buildDistanceMatrix, assignTeams, validatePlan, calculateTotalDistance } from '../lib/dinnerAlgorithm'
+import { geocodeAddresses, buildDistanceMatrix, assignTeams, validatePlan, calculateTotalDistance, haversineDistance } from '../lib/dinnerAlgorithm'
 import { jsPDF } from 'jspdf'
 import html2canvas from 'html2canvas'
 import { Document, Packer, Paragraph, TextRun, PageBreak, HeadingLevel } from 'docx'
@@ -326,133 +326,199 @@ function Step3({ teams, config, onNext, onBack }) {
   )
 }
 
+// ─── Step 4 helpers ───────────────────────────────────────────────────────────
+const COURSE_COLORS = { starter: '#3b82f6', main: '#8b5cf6', dessert: '#f97316' }
+const DIET_COLORS   = { vegan: 'bg-green-100 text-green-700', vegetarisch: 'bg-lime-100 text-lime-700', omnivor: 'bg-gray-100 text-gray-500' }
+
+function CourseSelect({ value, onChange }) {
+  return (
+    <select
+      value={value}
+      onChange={e => onChange(e.target.value)}
+      className="text-xs border border-gray-200 rounded px-1.5 py-1 bg-white text-gray-600 flex-shrink-0 cursor-pointer hover:border-gray-300 transition-colors"
+      title="Gang wechseln"
+    >
+      <option value="starter">🥗 Vorspeise</option>
+      <option value="main">🍝 Hauptspeise</option>
+      <option value="dessert">🍰 Nachspeise</option>
+    </select>
+  )
+}
+
+function GroupCard({ group, hostCourseMap, changeCourse }) {
+  const host = group.host
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+      {/* Host row */}
+      <div className="px-3 py-2 bg-gray-50 border-b border-gray-100">
+        <div className="flex items-center gap-1.5 justify-between">
+          <div className="flex items-center gap-1.5 min-w-0 flex-1">
+            <span className="text-xs px-1.5 py-0.5 rounded font-bold text-white flex-shrink-0" style={{ backgroundColor: COURSE_COLORS[group.course] }}>Host</span>
+            <span className="text-sm font-semibold text-gray-900 truncate">{host.names}</span>
+          </div>
+          <CourseSelect value={hostCourseMap[host.id]} onChange={v => changeCourse(host.id, v)} />
+        </div>
+        {host.address && <p className="text-xs text-gray-400 mt-0.5 truncate">{host.address}</p>}
+      </div>
+      {/* Guests */}
+      <div className="px-3 py-2 space-y-1.5">
+        {group.guests.map(guest => (
+          <div key={guest.id} className="flex items-center gap-2 justify-between">
+            <span className="text-sm text-gray-700 truncate flex-1">{guest.names}</span>
+            <div className="flex items-center gap-1 flex-shrink-0">
+              <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${DIET_COLORS[guest.diet] || DIET_COLORS.omnivor}`}>{guest.diet}</span>
+              <CourseSelect value={hostCourseMap[guest.id]} onChange={v => changeCourse(guest.id, v)} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // ─── Step 4: Manual Adjustment ────────────────────────────────────────────────
 function Step4ManualAdjustment({ plan, config, onNext, onBack }) {
-  const courses = ['starter', 'main', 'dessert']
-  const courseLabels = { starter: 'Vorspeise', main: 'Hauptspeise', dessert: 'Nachspeise' }
-  const courseEmojis = { starter: '🥗', main: '🍝', dessert: '🍰' }
-
-  // hostCourseMap: mutable state for drag & drop
   const [hostCourseMap, setHostCourseMap] = useState(() => {
     const map = {}
     for (const t of plan.teams) map[t.id] = t.hostCourse
     return map
   })
-  const [draggedId, setDraggedId] = useState(null)
-  const [regenerating, setRegenerating] = useState(false)
-
-  // Rebuild the plan whenever hostCourseMap changes
-  const rebuildPlan = (newMap) => {
-    return assignTeams(plan.teams.map(t => ({ ...t })), plan.distMatrix || null, newMap)
-  }
-
   const [previewPlan, setPreviewPlan] = useState(plan)
 
-  const handleDragStart = (e, teamId) => {
-    setDraggedId(teamId)
-    e.dataTransfer.effectAllowed = 'move'
-  }
-  const handleDragOver = (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move' }
-  const handleDrop = (e, targetCourse) => {
-    e.preventDefault()
-    if (!draggedId) return
-    const newMap = { ...hostCourseMap, [draggedId]: targetCourse }
+  const changeCourse = (teamId, newCourse) => {
+    const newMap = { ...hostCourseMap, [teamId]: newCourse }
     setHostCourseMap(newMap)
-    setDraggedId(null)
-
-    // Rebuild plan with new overrides
-    setRegenerating(true)
     try {
-      const rebuilt = rebuildPlan(newMap)
-      rebuilt.teamCoords = plan.teamCoords
+      const rebuilt = assignTeams(plan.teams.map(t => ({ ...t })), plan.distMatrix || null, newMap)
+      rebuilt.teamCoords  = plan.teamCoords
       rebuilt.dessertCoord = plan.dessertCoord
+      rebuilt.distMatrix  = plan.distMatrix
       setPreviewPlan(rebuilt)
     } catch { /* ignore */ }
-    setRegenerating(false)
   }
-  const handleDragEnd = () => setDraggedId(null)
 
   const validation = validatePlan(previewPlan)
-
-  // Group teams by course for column display
   const byHostCourse = { starter: [], main: [], dessert: [] }
-  for (const t of previewPlan.teams) {
-    byHostCourse[t.hostCourse]?.push(t)
-  }
-
-  const dietColors = {
-    vegan: 'bg-green-100 text-green-700',
-    vegetarisch: 'bg-lime-100 text-lime-700',
-    omnivor: 'bg-gray-100 text-gray-500',
-  }
+  for (const t of previewPlan.teams) byHostCourse[t.hostCourse]?.push(t)
 
   return (
     <div>
       <h2 className="text-2xl font-bold text-gray-900 mb-2">Plan überprüfen & anpassen</h2>
-      <p className="text-gray-500 mb-2">Verschiebe Teams per Drag & Drop zwischen den Gängen. Der Plan wird sofort angepasst.</p>
+      <p className="text-gray-500 mb-4 text-sm">Ändere den Gang eines Teams über das Dropdown neben seinem Namen – der Plan aktualisiert sich live.</p>
 
-      {/* Validation badge */}
+      {/* Status row */}
       <div className="flex flex-wrap gap-3 mb-6">
         {validation.duplicates === 0 ? (
-          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold bg-green-100 text-green-700">
-            ✅ Keine doppelten Begegnungen
-          </span>
+          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold bg-green-100 text-green-700">✅ Keine doppelten Begegnungen</span>
         ) : (
-          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold bg-red-100 text-red-700">
-            ⚠️ {validation.duplicates} doppelte Begegnung{validation.duplicates !== 1 ? 'en' : ''} – bitte anpassen
-          </span>
+          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold bg-red-100 text-red-700">⚠️ {validation.duplicates} doppelte Begegnung{validation.duplicates !== 1 ? 'en' : ''}</span>
         )}
         {plan.warning && (
-          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold bg-orange-100 text-orange-700">
-            ℹ️ {plan.warning}
-          </span>
+          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold bg-orange-100 text-orange-700">ℹ️ {plan.warning}</span>
         )}
+        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium bg-gray-100 text-gray-500">
+          {byHostCourse.starter.length}× 🥗 · {byHostCourse.main.length}× 🍝 · {byHostCourse.dessert.length}× 🍰
+        </span>
       </div>
 
-      {/* Three-column drag & drop board */}
-      <div className="grid grid-cols-3 gap-3 mb-8">
-        {courses.map(course => (
-          <div
-            key={course}
-            onDragOver={handleDragOver}
-            onDrop={e => handleDrop(e, course)}
-            className="min-h-40 rounded-2xl border-2 border-dashed p-3 transition-colors"
-            style={{ borderColor: draggedId ? ACCENT : '#d1d5db', backgroundColor: '#f9fafb' }}
-          >
-            <div className="text-xs font-bold uppercase tracking-wide text-gray-400 mb-3 flex items-center gap-1.5">
-              <span>{courseEmojis[course]}</span>
-              <span>{courseLabels[course]}</span>
-              <span className="ml-auto font-normal text-gray-300">{byHostCourse[course].length} Teams</span>
-            </div>
-            <div className="space-y-2">
-              {byHostCourse[course].map(team => (
-                <div
-                  key={team.id}
-                  draggable
-                  onDragStart={e => handleDragStart(e, team.id)}
-                  onDragEnd={handleDragEnd}
-                  className="bg-white rounded-xl px-3 py-2.5 shadow-sm border border-gray-100 cursor-grab active:cursor-grabbing select-none transition-all hover:shadow-md"
-                  style={{ opacity: draggedId === team.id ? 0.4 : 1 }}
-                >
-                  <p className="text-sm font-semibold text-gray-900 leading-tight truncate">{team.names}</p>
-                  <span className={`inline-block text-xs px-1.5 py-0.5 rounded-full font-medium mt-1 ${dietColors[team.diet] || dietColors.omnivor}`}>
-                    {team.diet}
-                  </span>
-                  {team.allergies && <span className="ml-1 text-xs text-orange-500">⚠️</span>}
-                </div>
-              ))}
-            </div>
+      {/* Summary table */}
+      <div className="overflow-x-auto mb-6 rounded-xl border border-gray-200">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50 border-b border-gray-200">
+            <tr className="text-left text-xs text-gray-500 uppercase tracking-wide">
+              <th className="px-3 py-2.5 font-semibold">Team</th>
+              <th className="px-3 py-2.5 font-semibold">Kocht</th>
+              <th className="px-3 py-2.5 font-semibold">🥗 Vorspeise bei</th>
+              <th className="px-3 py-2.5 font-semibold">🍝 Hauptspeise bei</th>
+              <th className="px-3 py-2.5 font-semibold">🍰 Nachspeise</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {previewPlan.teams.map(team => {
+              const isStarterHost = team.groups?.starter?.host?.id === team.id
+              const isMainHost    = team.groups?.main?.host?.id === team.id
+              return (
+                <tr key={team.id} className="hover:bg-gray-50">
+                  <td className="px-3 py-2 font-medium text-gray-900 whitespace-nowrap">{team.names}</td>
+                  <td className="px-3 py-2">
+                    <span className="text-xs px-2 py-0.5 rounded-full font-medium text-white" style={{ backgroundColor: COURSE_COLORS[team.hostCourse] }}>
+                      {{ starter: 'Vorspeise', main: 'Hauptspeise', dessert: 'Nachspeise' }[team.hostCourse]}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 text-xs text-gray-600">
+                    {isStarterHost ? <span className="font-semibold text-blue-600">eigene Adresse</span> : (team.groups?.starter?.host?.names || '—')}
+                  </td>
+                  <td className="px-3 py-2 text-xs text-gray-600">
+                    {isMainHost ? <span className="font-semibold text-purple-600">eigene Adresse</span> : (team.groups?.main?.host?.names || '—')}
+                  </td>
+                  <td className="px-3 py-2 text-xs text-gray-400">Gemeinsam</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Three-column group view */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+
+        {/* Starter */}
+        <div>
+          <div className="flex items-center gap-1.5 mb-3">
+            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COURSE_COLORS.starter }} />
+            <span className="text-sm font-bold text-gray-700">🥗 Vorspeise</span>
+            <span className="text-xs text-gray-400 ml-auto">{byHostCourse.starter.length} Tische</span>
           </div>
-        ))}
+          <div className="space-y-3">
+            {(previewPlan.groups?.starter || []).map((group, gi) => (
+              <GroupCard key={gi} group={group} hostCourseMap={hostCourseMap} changeCourse={changeCourse} />
+            ))}
+          </div>
+        </div>
+
+        {/* Main */}
+        <div>
+          <div className="flex items-center gap-1.5 mb-3">
+            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COURSE_COLORS.main }} />
+            <span className="text-sm font-bold text-gray-700">🍝 Hauptspeise</span>
+            <span className="text-xs text-gray-400 ml-auto">{byHostCourse.main.length} Tische</span>
+          </div>
+          <div className="space-y-3">
+            {(previewPlan.groups?.main || []).map((group, gi) => (
+              <GroupCard key={gi} group={group} hostCourseMap={hostCourseMap} changeCourse={changeCourse} />
+            ))}
+          </div>
+        </div>
+
+        {/* Dessert preparers */}
+        <div>
+          <div className="flex items-center gap-1.5 mb-3">
+            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COURSE_COLORS.dessert }} />
+            <span className="text-sm font-bold text-gray-700">🍰 Nachspeise</span>
+            <span className="text-xs text-gray-400 ml-auto">Vorbereiter</span>
+          </div>
+          <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 mb-3 text-xs">
+            <p className="font-semibold text-orange-800 mb-0.5">Gemeinsamer Ort</p>
+            <p className="text-orange-700">{config.dessertAddress || '—'}</p>
+          </div>
+          <div className="space-y-2">
+            {byHostCourse.dessert.map(team => (
+              <div key={team.id} className="bg-white rounded-xl px-3 py-2.5 border border-gray-200 shadow-sm">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-semibold text-gray-900 truncate flex-1">{team.names}</span>
+                  <CourseSelect value={hostCourseMap[team.id]} onChange={v => changeCourse(team.id, v)} />
+                </div>
+                <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium mt-1 inline-block ${DIET_COLORS[team.diet] || DIET_COLORS.omnivor}`}>{team.diet}</span>
+                {team.allergies && <span className="ml-1 text-xs text-orange-500">⚠️</span>}
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
 
       <div className="flex gap-3">
         <button onClick={onBack} className="flex-1 py-3 rounded-xl font-semibold text-gray-700 border border-gray-200 hover:bg-gray-50 transition-colors">← Zurück</button>
-        <button
-          onClick={() => onNext(previewPlan)}
-          className="flex-1 py-3 rounded-xl font-semibold text-white text-base transition-opacity"
-          style={{ backgroundColor: ACCENT }}
-        >
+        <button onClick={() => onNext(previewPlan)} className="flex-1 py-3 rounded-xl font-semibold text-white text-base transition-opacity" style={{ backgroundColor: ACCENT }}>
           Plan bestätigen & Nachrichten erstellen →
         </button>
       </div>
@@ -537,7 +603,7 @@ function MapTab({ plan, config }) {
     const tasks = []
     const hostsAdded = new Set()
 
-    for (const course of ['starter', 'main', 'dessert']) {
+    for (const course of ['starter', 'main']) {
       for (const group of (plan.groups[course] || [])) {
         const host = group.host
         if (!hostsAdded.has(host.id)) {
@@ -586,7 +652,7 @@ function MapTab({ plan, config }) {
     <div>
       {/* Legend */}
       <div className="flex flex-wrap gap-4 mb-4">
-        {[['starter', 'Vorspeise-Hosts', MARKER_COLORS.starter], ['main', 'Hauptspeise-Hosts', MARKER_COLORS.main], ['dessert', 'Nachspeise-Hosts', MARKER_COLORS.dessert], ['shared', 'Gemeinsamer Ort', MARKER_COLORS.shared]].map(([, label, color]) => (
+        {[['starter', 'Vorspeise-Hosts', MARKER_COLORS.starter], ['main', 'Hauptspeise-Hosts', MARKER_COLORS.main], ['shared', 'Gemeinsamer Nachspeise-Ort', MARKER_COLORS.shared]].map(([, label, color]) => (
           <div key={label} className="flex items-center gap-2 text-sm text-gray-600">
             <div style={{ width: 14, height: 14, borderRadius: '50%', backgroundColor: color }} />
             {label}
@@ -748,13 +814,16 @@ function MessagesTab({ messages, config, handleMessageDocx }) {
         </div>
       </div>
 
-      {/* ── ZIP all ICS ── */}
-      <div className="flex gap-2">
+      {/* ── ZIP all ICS + ICS hint ── */}
+      <div className="space-y-2">
         <button onClick={downloadAllIcs}
-          className="flex-1 py-2.5 rounded-xl font-semibold text-sm border border-gray-200 hover:bg-gray-50 transition-colors">
-          📅 Alle Kalender-Einladungen als ZIP
+          className="w-full py-2.5 rounded-xl font-semibold text-sm border border-gray-200 hover:bg-gray-50 transition-colors">
+          📅 Alle Kalender-Einladungen als ZIP herunterladen
           {noDate && <span className="ml-1 text-orange-500 text-xs">(kein Datum)</span>}
         </button>
+        <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 leading-relaxed">
+          💡 <strong>Kalender-Einladung als Anhang:</strong> Lade zuerst die .ics-Datei für das jeweilige Team herunter, öffne dann die Mail und füge die Datei manuell als Anhang ein.
+        </div>
       </div>
 
       {/* ── Per-team cards ── */}
@@ -767,8 +836,10 @@ function MessagesTab({ messages, config, handleMessageDocx }) {
                 <span className="font-semibold text-gray-900 text-sm flex-1 min-w-0 truncate">{team.names}</span>
                 <div className="flex gap-1.5 flex-wrap">
                   <CopyButton text={text} />
+                  {/* ICS + Mail side by side */}
                   <button onClick={() => downloadIcs(team, text)}
-                    className="text-xs px-3 py-1.5 rounded-lg font-semibold border border-gray-200 hover:bg-gray-50 text-gray-600 transition-colors">
+                    className="text-xs px-3 py-1.5 rounded-lg font-semibold border border-gray-200 hover:bg-gray-50 text-gray-600 transition-colors"
+                    title="Kalender-Einladung herunterladen">
                     📅 .ics
                   </button>
                   {hasEmail ? (
@@ -800,6 +871,207 @@ function MessagesTab({ messages, config, handleMessageDocx }) {
       <button onClick={handleMessageDocx} className="w-full py-2.5 rounded-xl font-semibold text-sm border border-gray-200 hover:bg-gray-50 transition-colors">
         📄 Alle Nachrichten als Word-Datei (.docx)
       </button>
+    </div>
+  )
+}
+
+// ─── Routes Tab ───────────────────────────────────────────────────────────────
+const ROUTE_COLORS = [
+  '#e74c3c','#e67e22','#2ecc71','#3498db','#9b59b6',
+  '#1abc9c','#f39c12','#e91e8c','#607d8b','#00bcd4',
+  '#ff5722','#8bc34a','#673ab7',
+]
+
+async function fetchOSRMRoute(waypoints) {
+  const coords = waypoints.map(p => `${p.lng},${p.lat}`).join(';')
+  const url = `https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson&steps=false`
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(`OSRM ${res.status}`)
+  const data = await res.json()
+  if (data.code !== 'Ok') throw new Error('OSRM: ' + data.code)
+  const route = data.routes[0]
+  return {
+    legs: route.legs.map(l => ({ distanceKm: Math.round(l.distance / 100) / 10 })),
+    totalKm: Math.round(route.distance / 100) / 10,
+    geometry: route.geometry,
+  }
+}
+
+function RoutesTab({ plan, config }) {
+  const mapRef = useRef(null)
+  const mapInstanceRef = useRef(null)
+  const [routeData, setRouteData] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [progress, setProgress] = useState({ done: 0, total: 0 })
+
+  useEffect(() => {
+    loadRoutes()
+    return () => { if (mapInstanceRef.current) { mapInstanceRef.current.remove(); mapInstanceRef.current = null } }
+  }, [])
+
+  const loadRoutes = async () => {
+    if (!plan.teamCoords) { setLoading(false); return }
+    const teamsWithHome = plan.teams.filter(t => plan.teamCoords[t.id])
+    setProgress({ done: 0, total: teamsWithHome.length })
+
+    const results = []
+    for (const team of plan.teams) {
+      const homeCoord    = plan.teamCoords[team.id]
+      if (!homeCoord) { results.push({ team, legs: null, totalKm: null, fallback: false, error: 'Keine Koordinaten' }); continue }
+
+      const starterCoord = plan.teamCoords[team.groups?.starter?.host?.id]
+      const mainCoord    = plan.teamCoords[team.groups?.main?.host?.id]
+      const dessertCoord = plan.dessertCoord
+      const waypoints    = [homeCoord, starterCoord, mainCoord, dessertCoord].filter(Boolean)
+
+      if (waypoints.length >= 2) {
+        try {
+          const { legs, totalKm, geometry } = await fetchOSRMRoute(waypoints)
+          results.push({ team, legs, totalKm, geometry, waypoints, fallback: false })
+          await new Promise(r => setTimeout(r, 1000))
+        } catch {
+          const legs = []
+          for (let i = 0; i < waypoints.length - 1; i++)
+            legs.push({ distanceKm: Math.round(haversineDistance(waypoints[i], waypoints[i+1]) * 10) / 10 })
+          results.push({ team, legs, totalKm: Math.round(legs.reduce((s,l) => s + l.distanceKm, 0) * 10) / 10, waypoints, fallback: true })
+        }
+      } else {
+        results.push({ team, legs: null, totalKm: null, fallback: false, error: 'Unvollständige Koordinaten' })
+      }
+      setProgress(p => ({ ...p, done: p.done + 1 }))
+    }
+
+    setRouteData(results)
+    setLoading(false)
+    drawMap(results)
+  }
+
+  const drawMap = (results) => {
+    if (!window.L || !mapRef.current) return
+    if (mapInstanceRef.current) { mapInstanceRef.current.remove(); mapInstanceRef.current = null }
+    const L = window.L
+    const map = L.map(mapRef.current).setView([52.52, 13.405], 12)
+    mapInstanceRef.current = map
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+      maxZoom: 19,
+    }).addTo(map)
+    const allPoints = []
+    results.forEach(({ team, geometry, waypoints, fallback }, idx) => {
+      const color = ROUTE_COLORS[idx % ROUTE_COLORS.length]
+      if (geometry) {
+        const latlngs = geometry.coordinates.map(c => [c[1], c[0]])
+        L.polyline(latlngs, { color, weight: 3, opacity: 0.75 }).addTo(map).bindPopup(team.names)
+        allPoints.push(...latlngs)
+      } else if (waypoints) {
+        const latlngs = waypoints.map(p => [p.lat, p.lng])
+        L.polyline(latlngs, { color, weight: 2, opacity: 0.5, dashArray: '6 4' }).addTo(map).bindPopup(team.names)
+        allPoints.push(...latlngs)
+      }
+    })
+    if (allPoints.length > 0) map.fitBounds(L.latLngBounds(allPoints), { padding: [30, 30] })
+  }
+
+  const wpLabels = (team) => [
+    { emoji: '🏠', label: `Start: ${team.address || team.names}` },
+    { emoji: '🥗', label: `Vorspeise bei ${team.groups?.starter?.host?.names || '?'}` + (team.groups?.starter?.host?.address ? ` (${team.groups.starter.host.address})` : '') },
+    { emoji: '🍝', label: `Hauptspeise bei ${team.groups?.main?.host?.names || '?'}` + (team.groups?.main?.host?.address ? ` (${team.groups.main.host.address})` : '') },
+    { emoji: '🍰', label: `Nachspeise: ${config.dessertAddress || 'Gemeinsamer Ort'} (gemeinsam)` },
+  ]
+
+  if (!plan.teamCoords) {
+    return (
+      <div className="text-center py-12 text-gray-400">
+        <div className="text-4xl mb-3">🗺️</div>
+        <p>Keine Koordinaten. Bitte den Plan mit aktivem Geocoding neu generieren.</p>
+      </div>
+    )
+  }
+
+  const validRoutes = (routeData || []).filter(r => r.totalKm !== null)
+  const avgKm = validRoutes.length > 0 ? Math.round(validRoutes.reduce((s,r) => s + r.totalKm, 0) / validRoutes.length * 10) / 10 : null
+  const maxR  = validRoutes.length > 0 ? validRoutes.reduce((a,b) => a.totalKm > b.totalKm ? a : b) : null
+  const minR  = validRoutes.length > 0 ? validRoutes.reduce((a,b) => a.totalKm < b.totalKm ? a : b) : null
+
+  return (
+    <div>
+      {loading && (
+        <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-xl">
+          <p className="text-sm font-semibold text-blue-900 mb-2">🗺️ Routen werden berechnet… ({progress.done}/{progress.total} Teams)</p>
+          <div className="w-full bg-blue-100 rounded-full h-2">
+            <div className="h-2 rounded-full transition-all" style={{ width: `${progress.total > 0 ? progress.done / progress.total * 100 : 0}%`, backgroundColor: ACCENT }} />
+          </div>
+          <p className="text-xs text-blue-500 mt-1">OSRM Routing · ca. 1 Sek. pro Team</p>
+        </div>
+      )}
+
+      {/* Map */}
+      <div className="relative rounded-2xl overflow-hidden border border-gray-200 mb-5" style={{ height: 360 }}>
+        {loading && !routeData && (
+          <div className="absolute inset-0 z-10 bg-white/80 flex items-center justify-center">
+            <p className="text-sm text-gray-400">Karte wird geladen…</p>
+          </div>
+        )}
+        <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
+      </div>
+
+      {/* Stats */}
+      {routeData && validRoutes.length > 0 && (
+        <div className="grid grid-cols-3 gap-3 mb-5">
+          {[
+            { label: 'Ø Strecke', val: `${avgKm} km` },
+            { label: 'Längste', val: maxR ? `${maxR.team.names.split('&')[0].trim()}: ${maxR.totalKm} km` : '—' },
+            { label: 'Kürzeste', val: minR ? `${minR.team.names.split('&')[0].trim()}: ${minR.totalKm} km` : '—' },
+          ].map(({ label, val }) => (
+            <div key={label} className="bg-gray-50 rounded-xl p-3 text-center border border-gray-100">
+              <p className="text-xs text-gray-400 mb-1">{label}</p>
+              <p className="text-sm font-bold text-gray-800">{val}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Per-team cards */}
+      {routeData && (
+        <div className="space-y-3">
+          {routeData.map(({ team, legs, totalKm, fallback, error }, idx) => {
+            const labels = wpLabels(team)
+            const color  = ROUTE_COLORS[idx % ROUTE_COLORS.length]
+            return (
+              <div key={team.id} className="bg-white rounded-xl border border-gray-200 p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <div style={{ width: 12, height: 12, borderRadius: '50%', backgroundColor: color, flexShrink: 0 }} />
+                  <span className="font-semibold text-gray-900 flex-1">{team.names}</span>
+                  {totalKm !== null && <span className="text-sm font-bold" style={{ color: ACCENT }}>{totalKm} km</span>}
+                  {fallback && <span className="text-xs text-orange-500">(Luftlinie)</span>}
+                </div>
+                {error ? (
+                  <p className="text-xs text-gray-400">{error}</p>
+                ) : legs ? (
+                  <div className="space-y-0.5">
+                    {labels.map((wp, i) => (
+                      <div key={i}>
+                        <div className="flex items-start gap-2 text-xs">
+                          <span className="flex-shrink-0 mt-0.5">{wp.emoji}</span>
+                          <span className="text-gray-700 leading-relaxed">{wp.label}</span>
+                        </div>
+                        {i < labels.length - 1 && legs[i] && (
+                          <div className="flex items-center gap-1 ml-5 my-0.5">
+                            <div className="w-px h-3 bg-gray-200 ml-0.5" />
+                            <span className="text-xs text-gray-400 ml-1">{legs[i].distanceKm} km{fallback ? ' (Luftlinie)' : ''}</span>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-400">Koordinaten nicht verfügbar</p>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
@@ -869,10 +1141,11 @@ function Step5({ plan, teams, config, onBack }) {
   }
 
   const tabs = [
-    { id: 'plan', label: '📊 Plan-Übersicht' },
+    { id: 'plan',     label: '📊 Plan-Übersicht' },
     { id: 'messages', label: '💬 Nachrichten' },
-    { id: 'map', label: '🗺️ Karte' },
-    { id: 'notes', label: '⚠️ Hinweise' },
+    { id: 'map',      label: '🗺️ Karte' },
+    { id: 'routes',   label: '🚗 Routen' },
+    { id: 'notes',    label: '⚠️ Hinweise' },
   ]
 
   return (
@@ -961,6 +1234,10 @@ function Step5({ plan, teams, config, onBack }) {
 
       {tab === 'map' && (
         <MapTab plan={plan} config={config} />
+      )}
+
+      {tab === 'routes' && (
+        <RoutesTab plan={plan} config={config} />
       )}
 
       {tab === 'notes' && (

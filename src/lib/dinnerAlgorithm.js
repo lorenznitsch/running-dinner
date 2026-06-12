@@ -167,7 +167,7 @@ export function assignTeams(teams, distMatrix = null, hostOverrides = {}, maxIte
   const groups = { starter: [], main: [], dessert: [] }
   let warning = null
 
-  for (const course of courses) {
+  for (const course of ['starter', 'main']) {
     const hosts = hostGroups[course]
     // Other teams are guests for this course
     const guestPool = teams.filter(t => hostCourseMap[t.id] !== course)
@@ -216,23 +216,14 @@ export function assignTeams(teams, distMatrix = null, hostOverrides = {}, maxIte
     }
   }
 
-  // Assign dessert group to all teams
-  const dessertHosts = hostGroups.dessert
-  if (dessertHosts.length > 0) {
-    const dessertLocation = teamMap[dessertHosts[0].id]
-    for (const t of Object.values(teamMap)) {
-      if (!t.groups.dessert) {
-        // For non-dessert hosts, point to first dessert group
-        t.groups.dessert = groups.dessert[0] || null
-      }
-    }
-  }
+  // Dessert is always at the shared organiser location — no host group is built.
+  // Teams with hostCourse='dessert' are "Nachspeise-Vorbereiter": guests at starter+main tables,
+  // they prepare dessert and bring it to the shared location.
 
   return {
     teams: Object.values(teamMap),
-    groups,
+    groups,          // { starter: [...], main: [...], dessert: [] }
     hostCourseMap,
-    dessertLocation: teamMap[hostGroups.dessert[0]?.id],
     warning,
   }
 }
@@ -284,7 +275,7 @@ function fallbackPick(hostId, candidates) {
  */
 export function validatePlan(plan) {
   const encountered = {} // "idA-idB" → count
-  const courses = ['starter', 'main', 'dessert']
+  const courses = ['starter', 'main']   // dessert is shared – no host groups to validate
 
   for (const course of courses) {
     for (const group of (plan.groups[course] || [])) {

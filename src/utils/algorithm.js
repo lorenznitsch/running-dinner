@@ -27,7 +27,9 @@ export function parseCSV(text) {
   const colAllergies = findCol('allergi', 'unverträglich', 'intoleran', 'unvertraglich')
   const colAddress = findCol('adresse', 'address', 'straße', 'strasse', 'wohnort')
   const colDoorbell = findCol('klingel', 'doorbell', 'klingelschild', 'türschild', 'turschild')
-  const colPhone = findCol('telefon', 'phone', 'handy', 'nummer', 'mobile', 'whatsapp')
+  const colPhone  = findCol('telefon', 'phone', 'handy', 'nummer', 'mobile', 'whatsapp')
+  const colEmail  = findCol('e-mail-adresse', 'email address', 'e-mail', 'email', 'mail', 'e_mail')
+  const colEmail2 = findCol('e-mail 2', 'email2', 'e-mail2', 'zweite mail', 'second email')
 
   const teams = []
   for (let i = 1; i < lines.length; i++) {
@@ -56,6 +58,8 @@ export function parseCSV(text) {
       address: colAddress !== -1 ? row[colAddress] : '',
       doorbell: colDoorbell !== -1 ? row[colDoorbell] : '',
       phone: colPhone !== -1 ? row[colPhone] : '',
+      email: colEmail !== -1 ? row[colEmail] : '',
+      email2: colEmail2 !== -1 ? row[colEmail2] : '',
     })
   }
 
