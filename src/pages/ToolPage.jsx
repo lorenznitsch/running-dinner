@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { parseCSV, generatePlan, buildMessage } from '../utils/algorithm'
+import { parseCSV, buildMessage } from '../utils/algorithm'
+import { geocodeAddresses, buildDistanceMatrix, assignTeams, validatePlan, calculateTotalDistance } from '../lib/dinnerAlgorithm'
 import { jsPDF } from 'jspdf'
 import html2canvas from 'html2canvas'
 import { Document, Packer, Paragraph, TextRun, PageBreak, HeadingLevel } from 'docx'
@@ -93,7 +94,7 @@ const ACCENT = '#1D9E75'
 
 // ─── Step Indicator ───────────────────────────────────────────────────────────
 function StepIndicator({ current }) {
-  const steps = ['CSV Upload', 'Konfiguration', 'Plan erstellen', 'Ergebnis']
+  const steps = ['CSV Upload', 'Konfiguration', 'Plan erstellen', 'Plan anpassen', 'Ergebnis']
   return (
     <div className="flex items-center justify-center gap-0 mb-10 flex-wrap">
       {steps.map((label, i) => {
@@ -240,19 +241,45 @@ function Step2({ teams, onNext, onBack }) {
 
 // ─── Step 3: Generate ─────────────────────────────────────────────────────────
 function Step3({ teams, config, onNext, onBack }) {
-  const [loading, setLoading] = useState(false)
+  const [phase, setPhase] = useState('idle') // idle | geocoding | assigning | done
+  const [geoProgress, setGeoProgress] = useState({ done: 0, total: 0 })
   const [error, setError] = useState('')
 
-  const handleGenerate = () => {
-    setLoading(true)
+  const handleGenerate = async () => {
     setError('')
+    setPhase('geocoding')
+    const total = teams.length + 1
+    setGeoProgress({ done: 0, total })
+
     try {
-      const plan = generatePlan(teams)
-      setTimeout(() => { setLoading(false); onNext(plan) }, 600)
-    } catch (err) { setLoading(false); setError(err.message) }
+      // 1. Geocode all addresses
+      const { teamCoords, dessertCoord } = await geocodeAddresses(
+        teams,
+        config.dessertAddress,
+        (done, tot) => setGeoProgress({ done, total: tot })
+      )
+
+      // 2. Build distance matrix
+      setPhase('assigning')
+      const distMatrix = buildDistanceMatrix(teams, teamCoords)
+
+      // 3. Run backtracking assignment
+      const result = assignTeams(teams, distMatrix)
+
+      // 4. Attach coordinates to result for later use
+      result.teamCoords = teamCoords
+      result.dessertCoord = dessertCoord
+
+      setPhase('done')
+      onNext(result)
+    } catch (err) {
+      setPhase('idle')
+      setError(err.message)
+    }
   }
 
   const dateStr = config.date ? new Date(config.date).toLocaleDateString('de-DE', { day: 'numeric', month: 'long', year: 'numeric' }) : ''
+  const loading = phase === 'geocoding' || phase === 'assigning'
 
   return (
     <div>
@@ -274,11 +301,168 @@ function Step3({ teams, config, onNext, onBack }) {
           </div>
         ))}
       </div>
+
+      {/* Geocoding progress */}
+      {phase === 'geocoding' && (
+        <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-xl">
+          <p className="text-sm font-semibold text-blue-900 mb-2">
+            📍 Adressen werden ermittelt… {geoProgress.done} von {geoProgress.total}
+          </p>
+          <div className="w-full bg-blue-100 rounded-full h-2.5">
+            <div
+              className="h-2.5 rounded-full transition-all"
+              style={{ width: `${geoProgress.total > 0 ? (geoProgress.done / geoProgress.total) * 100 : 0}%`, backgroundColor: ACCENT }}
+            />
+          </div>
+          <p className="text-xs text-blue-600 mt-1.5">Geocoding mit OpenStreetMap (ca. 1 Sek. pro Adresse)</p>
+        </div>
+      )}
+
+      {phase === 'assigning' && (
+        <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-xl">
+          <p className="text-sm font-semibold text-green-900">🔀 Optimale Zuweisung wird berechnet…</p>
+        </div>
+      )}
+
       {error && <p className="text-red-500 text-sm mb-4">{error}</p>}
       <div className="flex gap-3">
-        <button onClick={onBack} className="flex-1 py-3 rounded-xl font-semibold text-gray-700 border border-gray-200 hover:bg-gray-50 transition-colors">← Zurück</button>
+        <button onClick={onBack} disabled={loading} className="flex-1 py-3 rounded-xl font-semibold text-gray-700 border border-gray-200 hover:bg-gray-50 transition-colors disabled:opacity-40">← Zurück</button>
         <button onClick={handleGenerate} disabled={loading} className="flex-1 py-3 rounded-xl font-semibold text-white text-base transition-opacity disabled:opacity-60" style={{ backgroundColor: ACCENT }}>
-          {loading ? '⏳ Generiere...' : '🎲 Dinner-Plan erstellen'}
+          {loading ? '⏳ Läuft…' : '🎲 Dinner-Plan erstellen'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ─── Step 4: Manual Adjustment ────────────────────────────────────────────────
+function Step4ManualAdjustment({ plan, config, onNext, onBack }) {
+  const courses = ['starter', 'main', 'dessert']
+  const courseLabels = { starter: 'Vorspeise', main: 'Hauptspeise', dessert: 'Nachspeise' }
+  const courseEmojis = { starter: '🥗', main: '🍝', dessert: '🍰' }
+
+  // hostCourseMap: mutable state for drag & drop
+  const [hostCourseMap, setHostCourseMap] = useState(() => {
+    const map = {}
+    for (const t of plan.teams) map[t.id] = t.hostCourse
+    return map
+  })
+  const [draggedId, setDraggedId] = useState(null)
+  const [regenerating, setRegenerating] = useState(false)
+
+  // Rebuild the plan whenever hostCourseMap changes
+  const rebuildPlan = (newMap) => {
+    return assignTeams(plan.teams.map(t => ({ ...t })), plan.distMatrix || null, newMap)
+  }
+
+  const [previewPlan, setPreviewPlan] = useState(plan)
+
+  const handleDragStart = (e, teamId) => {
+    setDraggedId(teamId)
+    e.dataTransfer.effectAllowed = 'move'
+  }
+  const handleDragOver = (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move' }
+  const handleDrop = (e, targetCourse) => {
+    e.preventDefault()
+    if (!draggedId) return
+    const newMap = { ...hostCourseMap, [draggedId]: targetCourse }
+    setHostCourseMap(newMap)
+    setDraggedId(null)
+
+    // Rebuild plan with new overrides
+    setRegenerating(true)
+    try {
+      const rebuilt = rebuildPlan(newMap)
+      rebuilt.teamCoords = plan.teamCoords
+      rebuilt.dessertCoord = plan.dessertCoord
+      setPreviewPlan(rebuilt)
+    } catch { /* ignore */ }
+    setRegenerating(false)
+  }
+  const handleDragEnd = () => setDraggedId(null)
+
+  const validation = validatePlan(previewPlan)
+
+  // Group teams by course for column display
+  const byHostCourse = { starter: [], main: [], dessert: [] }
+  for (const t of previewPlan.teams) {
+    byHostCourse[t.hostCourse]?.push(t)
+  }
+
+  const dietColors = {
+    vegan: 'bg-green-100 text-green-700',
+    vegetarisch: 'bg-lime-100 text-lime-700',
+    omnivor: 'bg-gray-100 text-gray-500',
+  }
+
+  return (
+    <div>
+      <h2 className="text-2xl font-bold text-gray-900 mb-2">Plan überprüfen & anpassen</h2>
+      <p className="text-gray-500 mb-2">Verschiebe Teams per Drag & Drop zwischen den Gängen. Der Plan wird sofort angepasst.</p>
+
+      {/* Validation badge */}
+      <div className="flex flex-wrap gap-3 mb-6">
+        {validation.duplicates === 0 ? (
+          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold bg-green-100 text-green-700">
+            ✅ Keine doppelten Begegnungen
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold bg-red-100 text-red-700">
+            ⚠️ {validation.duplicates} doppelte Begegnung{validation.duplicates !== 1 ? 'en' : ''} – bitte anpassen
+          </span>
+        )}
+        {plan.warning && (
+          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold bg-orange-100 text-orange-700">
+            ℹ️ {plan.warning}
+          </span>
+        )}
+      </div>
+
+      {/* Three-column drag & drop board */}
+      <div className="grid grid-cols-3 gap-3 mb-8">
+        {courses.map(course => (
+          <div
+            key={course}
+            onDragOver={handleDragOver}
+            onDrop={e => handleDrop(e, course)}
+            className="min-h-40 rounded-2xl border-2 border-dashed p-3 transition-colors"
+            style={{ borderColor: draggedId ? ACCENT : '#d1d5db', backgroundColor: '#f9fafb' }}
+          >
+            <div className="text-xs font-bold uppercase tracking-wide text-gray-400 mb-3 flex items-center gap-1.5">
+              <span>{courseEmojis[course]}</span>
+              <span>{courseLabels[course]}</span>
+              <span className="ml-auto font-normal text-gray-300">{byHostCourse[course].length} Teams</span>
+            </div>
+            <div className="space-y-2">
+              {byHostCourse[course].map(team => (
+                <div
+                  key={team.id}
+                  draggable
+                  onDragStart={e => handleDragStart(e, team.id)}
+                  onDragEnd={handleDragEnd}
+                  className="bg-white rounded-xl px-3 py-2.5 shadow-sm border border-gray-100 cursor-grab active:cursor-grabbing select-none transition-all hover:shadow-md"
+                  style={{ opacity: draggedId === team.id ? 0.4 : 1 }}
+                >
+                  <p className="text-sm font-semibold text-gray-900 leading-tight truncate">{team.names}</p>
+                  <span className={`inline-block text-xs px-1.5 py-0.5 rounded-full font-medium mt-1 ${dietColors[team.diet] || dietColors.omnivor}`}>
+                    {team.diet}
+                  </span>
+                  {team.allergies && <span className="ml-1 text-xs text-orange-500">⚠️</span>}
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="flex gap-3">
+        <button onClick={onBack} className="flex-1 py-3 rounded-xl font-semibold text-gray-700 border border-gray-200 hover:bg-gray-50 transition-colors">← Zurück</button>
+        <button
+          onClick={() => onNext(previewPlan)}
+          className="flex-1 py-3 rounded-xl font-semibold text-white text-base transition-opacity"
+          style={{ backgroundColor: ACCENT }}
+        >
+          Plan übernehmen & weiter →
         </button>
       </div>
     </div>
@@ -725,8 +909,8 @@ function MessagesTab({ messages, config, handleMessageDocx }) {
   )
 }
 
-// ─── Step 4: Results ──────────────────────────────────────────────────────────
-function Step4({ plan, teams, config, onBack }) {
+// ─── Step 5: Results ──────────────────────────────────────────────────────────
+function Step5({ plan, teams, config, onBack }) {
   const [tab, setTab] = useState('plan')
   const planTableRef = useRef(null)
 
@@ -734,6 +918,8 @@ function Step4({ plan, teams, config, onBack }) {
   const dateStr = config.date ? new Date(config.date).toLocaleDateString('de-DE', { day: 'numeric', month: 'long', year: 'numeric' }) : config.date
 
   const messages = plan.teams.map(team => ({ team, text: buildMessage(team, plan, { ...config, date: dateStr }) }))
+  const validation = validatePlan(plan)
+  const distStats = plan.teamCoords ? calculateTotalDistance(plan, plan.teamCoords, plan.dessertCoord) : null
   const teamsWithAllergies = plan.teams.filter(t => t.allergies && t.allergies.trim())
 
   // PDF: plan table
@@ -821,6 +1007,24 @@ function Step4({ plan, teams, config, onBack }) {
           <button onClick={handlePlanPdf} className="mt-5 w-full py-2.5 rounded-xl font-semibold text-sm border border-gray-200 hover:bg-gray-50 transition-colors">
             📥 Als PDF speichern
           </button>
+
+          {/* Validation summary */}
+          <div className="mt-5 flex flex-wrap gap-3">
+            {validation.duplicates === 0 ? (
+              <span className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold bg-green-50 text-green-700 border border-green-200">
+                ✅ Keine doppelten Begegnungen
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold bg-red-50 text-red-700 border border-red-200">
+                ⚠️ {validation.duplicates} doppelte Begegnung{validation.duplicates !== 1 ? 'en' : ''} – zurück und anpassen
+              </span>
+            )}
+            {distStats && (
+              <span className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+                🗺️ Geschätzte Gesamtdistanz: {distStats.totalKm} km · Ø {distStats.avgKmPerTeam} km/Team
+              </span>
+            )}
+          </div>
         </div>
       )}
 
@@ -878,6 +1082,7 @@ export default function ToolPage() {
   const [teams, setTeams] = useState(injectedTeams)
   const [config, setConfig] = useState(null)
   const [plan, setPlan] = useState(null)
+  const [finalPlan, setFinalPlan] = useState(null)
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -896,7 +1101,8 @@ export default function ToolPage() {
           {step === 1 && <Step1 onNext={(t) => { setTeams(t); setStep(2) }} />}
           {step === 2 && <Step2 teams={teams} onNext={(c) => { setConfig(c); setStep(3) }} onBack={() => setStep(1)} />}
           {step === 3 && <Step3 teams={teams} config={config} onNext={(p) => { setPlan(p); setStep(4) }} onBack={() => setStep(2)} />}
-          {step === 4 && plan && <Step4 plan={plan} teams={teams} config={config} onBack={() => setStep(3)} />}
+          {step === 4 && plan && <Step4ManualAdjustment plan={plan} config={config} onNext={(p) => { setFinalPlan(p); setStep(5) }} onBack={() => setStep(3)} />}
+          {step === 5 && finalPlan && <Step5 plan={finalPlan} teams={teams} config={config} onBack={() => setStep(4)} />}
         </div>
       </div>
     </div>
