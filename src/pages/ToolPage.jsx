@@ -189,9 +189,9 @@ function Step1({ onNext }) {
 
 // ─── Step 2: Config ───────────────────────────────────────────────────────────
 function Step2({ teams, onNext, onBack }) {
-  const [config, setConfig] = useState({ date: '', timeStarter: '18:00', timeMain: '19:30', timeDessert: '21:00', dessertAddress: '', dessertDoorbell: '', contacts: '', whatsappLink: '' })
+  const [config, setConfig] = useState({ date: '', timeStarter: '18:00', timeMain: '19:30', timeDessert: '21:00', dessertMode: 'shared', dessertAddress: '', dessertDoorbell: '', contacts: '', whatsappLink: '' })
   const set = (key, val) => setConfig(c => ({ ...c, [key]: val }))
-  const valid = config.date && config.dessertAddress
+  const valid = config.date && (config.dessertMode === 'distributed' || config.dessertAddress)
 
   return (
     <div>
@@ -210,14 +210,41 @@ function Step2({ teams, onNext, onBack }) {
             </div>
           ))}
         </div>
+        {/* Nachspeise-Modus */}
         <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-2">Adresse Nachspeise-Ort (gemeinsam) *</label>
-          <input type="text" placeholder="Musterstraße 42, 10115 Berlin" value={config.dessertAddress} onChange={e => set('dessertAddress', e.target.value)} className="w-full border border-gray-200 rounded-xl px-4 py-3 text-gray-900 placeholder-gray-300 focus:outline-none focus:ring-2" />
+          <label className="block text-sm font-semibold text-gray-700 mb-3">Wo findet die Nachspeise statt?</label>
+          <div className="flex gap-3">
+            {[
+              { val: 'shared',      icon: '🍰', label: 'Gemeinsamer Ort', desc: 'Alle kommen zusammen' },
+              { val: 'distributed', icon: '🏠', label: 'Verschiedene Orte', desc: 'Wie Vor- & Hauptspeise' },
+            ].map(opt => (
+              <label key={opt.val} className="flex-1 cursor-pointer rounded-xl border-2 p-3 text-center transition-all"
+                style={{ borderColor: config.dessertMode === opt.val ? ACCENT : '#e5e7eb', backgroundColor: config.dessertMode === opt.val ? '#f0fdf6' : 'white' }}>
+                <input type="radio" name="dessertMode" value={opt.val} checked={config.dessertMode === opt.val}
+                  onChange={() => set('dessertMode', opt.val)} className="sr-only" />
+                <div className="text-2xl mb-1">{opt.icon}</div>
+                <div className="text-xs font-semibold text-gray-800">{opt.label}</div>
+                <div className="text-xs text-gray-400">{opt.desc}</div>
+              </label>
+            ))}
+          </div>
         </div>
-        <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-2">Klingelschild Nachspeise-Ort</label>
-          <input type="text" placeholder="z.B. Müller" value={config.dessertDoorbell} onChange={e => set('dessertDoorbell', e.target.value)} className="w-full border border-gray-200 rounded-xl px-4 py-3 text-gray-900 placeholder-gray-300 focus:outline-none focus:ring-2" />
-        </div>
+        {config.dessertMode === 'shared' ? (
+          <>
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-2">Adresse Nachspeise-Ort (gemeinsam) *</label>
+              <input type="text" placeholder="Musterstraße 42, 10115 Berlin" value={config.dessertAddress} onChange={e => set('dessertAddress', e.target.value)} className="w-full border border-gray-200 rounded-xl px-4 py-3 text-gray-900 placeholder-gray-300 focus:outline-none focus:ring-2" />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-2">Klingelschild Nachspeise-Ort</label>
+              <input type="text" placeholder="z.B. Müller" value={config.dessertDoorbell} onChange={e => set('dessertDoorbell', e.target.value)} className="w-full border border-gray-200 rounded-xl px-4 py-3 text-gray-900 placeholder-gray-300 focus:outline-none focus:ring-2" />
+            </div>
+          </>
+        ) : (
+          <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl text-sm text-blue-800">
+            ℹ️ Die Nachspeise-Hosts werden automatisch aus den angemeldeten Teams bestimmt. Jedes Team geht zu einer der ausgelosten Nachspeise-Adressen.
+          </div>
+        )}
         <div>
           <label className="block text-sm font-semibold text-gray-700 mb-2">Kontaktpersonen (Name + Nummer)</label>
           <textarea rows={3} placeholder={"Lisa Müller: 0151 12345678\nMax Schmidt: 0172 87654321"} value={config.contacts} onChange={e => set('contacts', e.target.value)} className="w-full border border-gray-200 rounded-xl px-4 py-3 text-gray-900 placeholder-gray-300 focus:outline-none focus:ring-2 resize-none" />
@@ -244,19 +271,13 @@ function Step3({ teams, config, onNext, onBack }) {
 
   const computeValidation = () => {
     const n = teams.length
+    const isDistributed = config.dessertMode === 'distributed'
     const targetHosts = Math.floor(n / 3)
-    const balanced = targetHosts === Math.floor(n / 3) // always true, but show the numbers
-    const remainder = n - 2 * targetHosts // dessert-prep teams
-    const teamsPerTable = 3  // 1 host + 2 guests
-    const peoplePerTable = teamsPerTable * 2 // assuming 2 people per team
-    const totalTables = 2 * targetHosts // starter + main tables
-    const tablesWithIdealSize = remainder === 0 ? totalTables : Math.max(0, totalTables - remainder)
+    const remainder = n - (isDistributed ? 3 : 2) * targetHosts
+    const coursesWithHosts = isDistributed ? 3 : 2
+    const totalTables = coursesWithHosts * targetHosts
 
-    return {
-      n, targetHosts, remainder, balanced, totalTables,
-      tablesWithIdealSize, peoplePerTable,
-      hostsOk: true, // always balanced by algorithm
-    }
+    return { n, targetHosts, remainder, totalTables, isDistributed }
   }
 
   const handleValidate = () => {
@@ -289,10 +310,11 @@ function Step3({ teams, config, onNext, onBack }) {
         }
       }
 
-      const result = assignTeams(teams, distMatrix, {}, 1000, dessertDistances)
-      result.teamCoords = teamCoords
-      result.dessertCoord = dessertCoord
-      result.distMatrix = distMatrix
+      const result = assignTeams(teams, distMatrix, {}, 1000, dessertDistances, config.dessertMode)
+      result.teamCoords  = teamCoords
+      result.dessertCoord = config.dessertMode === 'shared' ? dessertCoord : null
+      result.distMatrix  = distMatrix
+      result.dessertMode = config.dessertMode
 
       setPhase('done')
       onNext(result)
@@ -340,7 +362,8 @@ function Step3({ teams, config, onNext, onBack }) {
               <div className="flex items-start gap-2">
                 <span>✅</span>
                 <span className={allOk ? 'text-green-800' : 'text-amber-800'}>
-                  <strong>Host-Anzahl ausgeglichen:</strong> je {v.targetHosts} Vorspeise- und Hauptspeise-Hosts
+                  <strong>Host-Anzahl ausgeglichen:</strong> je {v.targetHosts} Hosts pro Gang
+                  {v.isDistributed ? ' (Vorspeise, Hauptspeise, Nachspeise)' : ' (Vorspeise + Hauptspeise)'}
                 </span>
               </div>
               {/* Check 2: Tischgrößen */}
@@ -350,14 +373,14 @@ function Step3({ teams, config, onNext, onBack }) {
                   <strong>Tischgröße:</strong>{' '}
                   {v.remainder === 0
                     ? `Alle ${v.totalTables} Tische haben je 3 Teams (ca. 6 Personen) – optimal`
-                    : `${v.n} Teams sind nicht exakt durch 3 teilbar (Rest: ${v.remainder}). Einige Tische werden mehr oder weniger Personen haben.`}
+                    : `${v.n} Teams sind nicht exakt durch 3 teilbar (Rest: ${v.remainder}). Einige Tische werden unterschiedlich groß sein.`}
                 </span>
               </div>
-              {/* Check 3: summary */}
+              {/* Check 3: Modus */}
               <div className="flex items-start gap-2">
                 <span>ℹ️</span>
                 <span className={allOk ? 'text-green-800' : 'text-amber-800'}>
-                  {v.totalTables} Tische insgesamt · {v.targetHosts} Vorspeise-Tische · {v.targetHosts} Hauptspeise-Tische
+                  {v.totalTables} Tische insgesamt · Modus: {v.isDistributed ? '🏠 Nachspeise verteilt' : '🍰 Gemeinsame Nachspeise'}
                 </span>
               </div>
             </div>
@@ -449,15 +472,19 @@ function Step4MapView({ plan, config }) {
     }
 
     const hostIds = new Set()
-    for (const course of ['starter', 'main']) {
+    const isDistributed4 = plan.dessertMode === 'distributed'
+    const coursesToShow4 = isDistributed4 ? ['starter', 'main', 'dessert'] : ['starter', 'main']
+    for (const course of coursesToShow4) {
+      const cat = course === 'dessert' ? 'shared' : course
       for (const g of (plan.groups[course] || [])) {
         if (hostIds.has(g.host.id)) continue
         hostIds.add(g.host.id)
         const c = plan.teamCoords[g.host.id]
-        if (c) addM(course, c.lat, c.lng, `<strong>${g.host.names}</strong><br/>${course === 'starter' ? 'Vorspeise' : 'Hauptspeise'}<br/><small>${g.host.address || ''}</small>`)
+        const label = course === 'starter' ? 'Vorspeise' : course === 'main' ? 'Hauptspeise' : 'Nachspeise'
+        if (c) addM(cat, c.lat, c.lng, `<strong>${g.host.names}</strong><br/>${label}<br/><small>${g.host.address || ''}</small>`)
       }
     }
-    if (plan.dessertCoord) {
+    if (!isDistributed4 && plan.dessertCoord) {
       addM('shared', plan.dessertCoord.lat, plan.dessertCoord.lng, `<strong>Nachspeise-Ort</strong><br/><small>${config.dessertAddress || ''}</small>`)
     }
     for (const team of plan.teams) {
@@ -519,10 +546,12 @@ function Step4ManualAdjustment({ plan, config, onNext, onBack }) {
     </span>
   )
 
+  const isDistributed = plan.dessertMode === 'distributed'
+
   const rebuildFromMap = (newMap) => {
     try {
-      const r = assignTeams(plan.teams.map(t => ({ ...t })), plan.distMatrix || null, newMap)
-      r.teamCoords = plan.teamCoords; r.dessertCoord = plan.dessertCoord; r.distMatrix = plan.distMatrix
+      const r = assignTeams(plan.teams.map(t => ({ ...t })), plan.distMatrix || null, newMap, 1000, null, plan.dessertMode)
+      r.teamCoords = plan.teamCoords; r.dessertCoord = plan.dessertCoord; r.distMatrix = plan.distMatrix; r.dessertMode = plan.dessertMode
       return r
     } catch { return localPlan }
   }
@@ -573,22 +602,31 @@ function Step4ManualAdjustment({ plan, config, onNext, onBack }) {
 
   // Live stats
   const validation  = validatePlan(localPlan)
-  const distStats   = localPlan.teamCoords ? calculateTotalDistance(localPlan, localPlan.teamCoords, localPlan.dessertCoord) : null
-  const allGroups   = [...(localPlan.groups.starter || []), ...(localPlan.groups.main || [])]
-  const dietOk      = allGroups.filter(g => [g.host, ...g.guests].every(m => m.diet === g.host.diet)).length
-  const groupSizes  = allGroups.map(g => 1 + g.guests.length)
-  const sizesUnique = [...new Set(groupSizes)]
+  const distStats   = localPlan.teamCoords ? calculateTotalDistance(localPlan, localPlan.teamCoords, localPlan.dessertCoord, localPlan.dessertMode) : null
+  const starterGroups  = localPlan.groups.starter || []
+  const mainGroups     = localPlan.groups.main    || []
+  const dessertGroups  = localPlan.groups.dessert || []
+  const allGroups      = [...starterGroups, ...mainGroups, ...(isDistributed ? dessertGroups : [])]
+  const dietOk         = allGroups.filter(g => [g.host, ...g.guests].every(m => m.diet === g.host.diet)).length
+  const groupSizes     = allGroups.map(g => 1 + g.guests.length)
+  const sizesUnique    = [...new Set(groupSizes)]
 
-  const starterGroups = localPlan.groups.starter || []
-  const mainGroups    = localPlan.groups.main    || []
   const starterHosts  = starterGroups.map(g => g.host)
   const mainHosts     = mainGroups.map(g => g.host)
+  const dessertHosts  = dessertGroups.map(g => g.host)
 
   // Status bar per table
   const tableStatuses = [
     ...starterGroups.map(g => ({ name: g.host.names, count: 1 + g.guests.length, course: 'starter' })),
     ...mainGroups.map(g => ({ name: g.host.names, count: 1 + g.guests.length, course: 'main' })),
+    ...(isDistributed ? dessertGroups.map(g => ({ name: g.host.names, count: 1 + g.guests.length, course: 'dessert' })) : []),
   ]
+
+  // Group size badge helper
+  const sizeBadge = (t) => {
+    const sz = t.groupSize || 2
+    return sz === 3 ? <span className="text-xs px-1 py-0.5 rounded bg-orange-100 text-orange-700 font-bold flex-shrink-0">3P</span> : null
+  }
 
   return (
     <div>
@@ -617,22 +655,26 @@ function Step4ManualAdjustment({ plan, config, onNext, onBack }) {
                 <div style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#3b82f6' }} />
                 Gang 1 – Vorspeise
               </div>
-              {starterGroups.map((group, i) => (
-                <div key={i} className="border border-gray-200 rounded-xl overflow-hidden mb-2">
-                  <div className="px-3 py-2 flex items-center gap-2" style={{ backgroundColor: '#3b82f615', borderBottom: '1px solid #3b82f630' }}>
-                    <span className="font-bold text-sm text-gray-900 flex-1 min-w-0 truncate" title={group.host.names}>{group.host.names}</span>
-                    {dietBadge(group.host.diet)}
-                  </div>
-                  {group.guests.map(g => (
-                    <div key={g.id} className="px-3 py-1.5 flex items-center gap-2 border-b border-gray-100 last:border-b-0 hover:bg-blue-50/40">
-                      <span className="text-xs text-gray-700 flex-1 min-w-0 truncate">{g.names}</span>
-                      {dietBadge(g.diet)}
-                      <button onClick={() => setTischSwap({ teamId: g.id, course: 'starter', currentHostId: group.host.id })}
-                        className="text-gray-300 hover:text-blue-500 text-base leading-none px-0.5 flex-shrink-0" title="Verschieben">⇄</button>
+              {starterGroups.map((group, i) => {
+                const total = [group.host, ...group.guests].reduce((s, t) => s + (t.groupSize || 2), 0)
+                return (
+                  <div key={i} className="border border-gray-200 rounded-xl overflow-hidden mb-2">
+                    <div className="px-3 py-2 flex items-center gap-2" style={{ backgroundColor: '#3b82f615', borderBottom: '1px solid #3b82f630' }}>
+                      <span className="font-bold text-sm text-gray-900 flex-1 min-w-0 truncate" title={group.host.names}>{group.host.names}</span>
+                      {sizeBadge(group.host)}{dietBadge(group.host.diet)}
+                      <span className="text-xs text-gray-400">{total}P</span>
                     </div>
-                  ))}
-                </div>
-              ))}
+                    {group.guests.map(g => (
+                      <div key={g.id} className="px-3 py-1.5 flex items-center gap-2 border-b border-gray-100 last:border-b-0 hover:bg-blue-50/40">
+                        <span className="text-xs text-gray-700 flex-1 min-w-0 truncate">{g.names}</span>
+                        {sizeBadge(g)}{dietBadge(g.diet)}
+                        <button onClick={() => setTischSwap({ teamId: g.id, course: 'starter', currentHostId: group.host.id })}
+                          className="text-gray-300 hover:text-blue-500 text-base leading-none px-0.5 flex-shrink-0" title="Verschieben">⇄</button>
+                      </div>
+                    ))}
+                  </div>
+                )
+              })}
             </div>
 
             {/* Gang 2: Hauptspeise */}
@@ -641,42 +683,69 @@ function Step4ManualAdjustment({ plan, config, onNext, onBack }) {
                 <div style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#8b5cf6' }} />
                 Gang 2 – Hauptspeise
               </div>
-              {mainGroups.map((group, i) => (
-                <div key={i} className="border border-gray-200 rounded-xl overflow-hidden mb-2">
-                  <div className="px-3 py-2 flex items-center gap-2" style={{ backgroundColor: '#8b5cf615', borderBottom: '1px solid #8b5cf630' }}>
-                    <span className="font-bold text-sm text-gray-900 flex-1 min-w-0 truncate" title={group.host.names}>{group.host.names}</span>
-                    {dietBadge(group.host.diet)}
+              {mainGroups.map((group, i) => {
+                const total = [group.host, ...group.guests].reduce((s, t) => s + (t.groupSize || 2), 0)
+                return (
+                  <div key={i} className="border border-gray-200 rounded-xl overflow-hidden mb-2">
+                    <div className="px-3 py-2 flex items-center gap-2" style={{ backgroundColor: '#8b5cf615', borderBottom: '1px solid #8b5cf630' }}>
+                      <span className="font-bold text-sm text-gray-900 flex-1 min-w-0 truncate" title={group.host.names}>{group.host.names}</span>
+                      {sizeBadge(group.host)}{dietBadge(group.host.diet)}
+                      <span className="text-xs text-gray-400">{total}P</span>
+                    </div>
+                    {group.guests.map(g => (
+                      <div key={g.id} className="px-3 py-1.5 flex items-center gap-2 border-b border-gray-100 last:border-b-0 hover:bg-purple-50/40">
+                        <span className="text-xs text-gray-700 flex-1 min-w-0 truncate">{g.names}</span>
+                        {sizeBadge(g)}{dietBadge(g.diet)}
+                        <button onClick={() => setTischSwap({ teamId: g.id, course: 'main', currentHostId: group.host.id })}
+                          className="text-gray-300 hover:text-purple-500 text-base leading-none px-0.5 flex-shrink-0" title="Verschieben">⇄</button>
+                      </div>
+                    ))}
                   </div>
-                  {group.guests.map(g => (
-                    <div key={g.id} className="px-3 py-1.5 flex items-center gap-2 border-b border-gray-100 last:border-b-0 hover:bg-purple-50/40">
-                      <span className="text-xs text-gray-700 flex-1 min-w-0 truncate">{g.names}</span>
-                      {dietBadge(g.diet)}
-                      <button onClick={() => setTischSwap({ teamId: g.id, course: 'main', currentHostId: group.host.id })}
-                        className="text-gray-300 hover:text-purple-500 text-base leading-none px-0.5 flex-shrink-0" title="Verschieben">⇄</button>
+                )
+              })}
+            </div>
+
+            {/* Gang 3: Nachspeise */}
+            <div>
+              <div className="text-xs font-bold uppercase tracking-wide mb-2 flex items-center gap-1" style={{ color: '#f97316' }}>
+                <div style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#f97316' }} />
+                Gang 3 – Nachspeise
+              </div>
+              {isDistributed ? (
+                dessertGroups.map((group, i) => {
+                  const total = [group.host, ...group.guests].reduce((s, t) => s + (t.groupSize || 2), 0)
+                  return (
+                    <div key={i} className="border border-gray-200 rounded-xl overflow-hidden mb-2">
+                      <div className="px-3 py-2 flex items-center gap-2" style={{ backgroundColor: '#f9731615', borderBottom: '1px solid #f9731630' }}>
+                        <span className="font-bold text-sm text-gray-900 flex-1 min-w-0 truncate" title={group.host.names}>{group.host.names}</span>
+                        {sizeBadge(group.host)}{dietBadge(group.host.diet)}
+                        <span className="text-xs text-gray-400">{total}P</span>
+                      </div>
+                      {group.guests.map(g => (
+                        <div key={g.id} className="px-3 py-1.5 flex items-center gap-2 border-b border-gray-100 last:border-b-0 hover:bg-orange-50/40">
+                          <span className="text-xs text-gray-700 flex-1 min-w-0 truncate">{g.names}</span>
+                          {sizeBadge(g)}{dietBadge(g.diet)}
+                          <button onClick={() => setTischSwap({ teamId: g.id, course: 'dessert', currentHostId: group.host.id })}
+                            className="text-gray-300 hover:text-orange-500 text-base leading-none px-0.5 flex-shrink-0" title="Verschieben">⇄</button>
+                        </div>
+                      ))}
+                    </div>
+                  )
+                })
+              ) : (
+                <div className="border border-gray-200 rounded-xl overflow-hidden">
+                  <div className="px-3 py-2" style={{ backgroundColor: '#1D9E7512', borderBottom: '1px solid #1D9E7530' }}>
+                    <span className="font-bold text-xs text-gray-900 leading-tight block">{config.dessertAddress || 'Gemeinsamer Ort'}</span>
+                    <span className="text-xs text-gray-400">Alle Teams</span>
+                  </div>
+                  {localPlan.teams.map(t => (
+                    <div key={t.id} className="px-3 py-1.5 flex items-center gap-2 border-b border-gray-100 last:border-b-0">
+                      <span className="text-xs text-gray-700 flex-1 min-w-0 truncate">{t.names}</span>
+                      {sizeBadge(t)}{dietBadge(t.diet)}
                     </div>
                   ))}
                 </div>
-              ))}
-            </div>
-
-            {/* Gang 3: Nachspeise (gemeinsam) */}
-            <div>
-              <div className="text-xs font-bold uppercase tracking-wide mb-2 flex items-center gap-1" style={{ color: '#1D9E75' }}>
-                <div style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#1D9E75' }} />
-                Gang 3 – Nachspeise
-              </div>
-              <div className="border border-gray-200 rounded-xl overflow-hidden">
-                <div className="px-3 py-2" style={{ backgroundColor: '#1D9E7512', borderBottom: '1px solid #1D9E7530' }}>
-                  <span className="font-bold text-xs text-gray-900 leading-tight block">{config.dessertAddress || 'Gemeinsamer Ort'}</span>
-                  <span className="text-xs text-gray-400">Alle Teams</span>
-                </div>
-                {localPlan.teams.map(t => (
-                  <div key={t.id} className="px-3 py-1.5 flex items-center gap-2 border-b border-gray-100 last:border-b-0">
-                    <span className="text-xs text-gray-700 flex-1 min-w-0 truncate">{t.names}</span>
-                    {dietBadge(t.diet)}
-                  </div>
-                ))}
-              </div>
+              )}
             </div>
           </div>
 
@@ -728,14 +797,17 @@ function Step4ManualAdjustment({ plan, config, onNext, onBack }) {
                   <th className="px-3 py-2.5 font-semibold">Kocht</th>
                   <th className="px-3 py-2.5 font-semibold">🥗 Vorspeise bei</th>
                   <th className="px-3 py-2.5 font-semibold">🍝 Hauptspeise bei</th>
+                  {isDistributed && <th className="px-3 py-2.5 font-semibold">🍰 Nachspeise bei</th>}
                 </tr>
               </thead>
               <tbody>
                 {localPlan.teams.map(team => {
-                  const isStarterHost = team.groups?.starter?.host?.id === team.id
-                  const isMainHost    = team.groups?.main?.host?.id    === team.id
-                  const starterHostId = team.groups?.starter?.host?.id ?? ''
-                  const mainHostId    = team.groups?.main?.host?.id    ?? ''
+                  const isStarterHost  = team.groups?.starter?.host?.id === team.id
+                  const isMainHost     = team.groups?.main?.host?.id    === team.id
+                  const isDessertHost  = team.groups?.dessert?.host?.id === team.id
+                  const starterHostId  = team.groups?.starter?.host?.id ?? ''
+                  const mainHostId     = team.groups?.main?.host?.id    ?? ''
+                  const dessertHostId  = team.groups?.dessert?.host?.id ?? ''
                   return (
                     <tr key={team.id} className="border-b border-gray-100 hover:bg-blue-50/30 transition-colors">
                       <td className="px-3 py-2.5 font-semibold text-gray-900 sticky left-0 bg-white whitespace-nowrap" style={{ boxShadow: '2px 0 4px rgba(0,0,0,0.04)' }}>
@@ -773,6 +845,17 @@ function Step4ManualAdjustment({ plan, config, onNext, onBack }) {
                               {mainHosts.map(h => <option key={h.id} value={h.id}>{h.names}</option>)}
                             </select>}
                       </td>
+                      {isDistributed && (
+                        <td className="px-3 py-2.5">
+                          {isDessertHost
+                            ? <span className="text-xs font-semibold text-orange-600">Eigene Adresse</span>
+                            : <select value={dessertHostId} onChange={e => swapInCourse('dessert', team.id, Number(e.target.value))}
+                                className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-700 cursor-pointer hover:border-gray-300 focus:outline-none focus:ring-1"
+                                disabled={dessertHosts.length === 0}>
+                                {dessertHosts.map(h => <option key={h.id} value={h.id}>{h.names}</option>)}
+                              </select>}
+                        </td>
+                      )}
                     </tr>
                   )
                 })}
@@ -804,16 +887,17 @@ function Step4ManualAdjustment({ plan, config, onNext, onBack }) {
 
       {/* ── Tisch Swap Modal ── */}
       {tischSwap && (() => {
-        const groups = tischSwap.course === 'starter' ? starterGroups : mainGroups
+        const courseGroupsMap = { starter: starterGroups, main: mainGroups, dessert: dessertGroups }
+        const groups = courseGroupsMap[tischSwap.course] || []
         const team   = localPlan.teams.find(t => t.id === tischSwap.teamId)
-        const color  = COURSE_COLOR[tischSwap.course]
+        const color  = COURSE_COLOR[tischSwap.course] || '#f97316'
         const otherGroups = groups.filter(g => g.host.id !== tischSwap.currentHostId)
         return (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
             <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full max-h-[80vh] overflow-y-auto">
               <h3 className="font-bold text-gray-900 text-lg mb-1">⇄ {team?.names} verschieben</h3>
               <p className="text-gray-500 text-sm mb-4">
-                Wähle einen anderen Tisch ({tischSwap.course === 'starter' ? 'Vorspeise' : 'Hauptspeise'}) für einen 1:1-Tausch:
+                Wähle einen anderen Tisch ({tischSwap.course === 'starter' ? 'Vorspeise' : tischSwap.course === 'main' ? 'Hauptspeise' : 'Nachspeise'}) für einen 1:1-Tausch:
               </p>
               <div className="space-y-2 mb-4">
                 {otherGroups.map(g => (
@@ -968,18 +1052,22 @@ function MapTab({ plan, config }) {
       points.push([lat, lng])
     }
 
+    const isDistributed = plan.dessertMode === 'distributed'
     if (plan.teamCoords) {
       // Fast path: use pre-computed coords
       const hostIds = new Set()
-      for (const course of ['starter', 'main']) {
+      const coursesToShow = isDistributed ? ['starter', 'main', 'dessert'] : ['starter', 'main']
+      for (const course of coursesToShow) {
+        const cat = course === 'dessert' ? 'shared' : course
         for (const g of (plan.groups[course] || [])) {
           if (hostIds.has(g.host.id)) continue
           hostIds.add(g.host.id)
           const c = plan.teamCoords[g.host.id]
-          if (c) addM(course, c.lat, c.lng, `<strong>${g.host.names}</strong><br/>${course === 'starter' ? 'Vorspeise' : 'Hauptspeise'}<br/><small>${g.host.address || ''}</small>`)
+          const label = course === 'starter' ? 'Vorspeise' : course === 'main' ? 'Hauptspeise' : 'Nachspeise'
+          if (c) addM(cat, c.lat, c.lng, `<strong>${g.host.names}</strong><br/>${label}<br/><small>${g.host.address || ''}</small>`)
         }
       }
-      if (plan.dessertCoord) {
+      if (!isDistributed && plan.dessertCoord) {
         addM('shared', plan.dessertCoord.lat, plan.dessertCoord.lng, `<strong>Gemeinsamer Nachspeise-Ort</strong><br/><small>${config.dessertAddress || ''}</small>`)
       }
       for (const team of plan.teams) {
@@ -995,15 +1083,19 @@ function MapTab({ plan, config }) {
       // Fallback: geocode host addresses on-the-fly
       const tasks = []
       const hostsAdded = new Set()
-      for (const course of ['starter', 'main']) {
+      const coursesToShow = isDistributed ? ['starter', 'main', 'dessert'] : ['starter', 'main']
+      for (const course of coursesToShow) {
+        const cat = course === 'dessert' ? 'shared' : course
         for (const g of (plan.groups[course] || [])) {
           if (hostsAdded.has(g.host.id)) continue
           hostsAdded.add(g.host.id)
           const h = g.host
-          tasks.push(geocode(h.address).then(c => { if (c) addM(course, c.lat, c.lng, `<strong>${h.names}</strong><br/><small>${h.address}</small>`) }))
+          tasks.push(geocode(h.address).then(c => { if (c) addM(cat, c.lat, c.lng, `<strong>${h.names}</strong><br/><small>${h.address}</small>`) }))
         }
       }
-      tasks.push(geocode(config.dessertAddress).then(c => { if (c) addM('shared', c.lat, c.lng, `<strong>Nachspeise-Ort</strong><br/><small>${config.dessertAddress}</small>`) }))
+      if (!isDistributed) {
+        tasks.push(geocode(config.dessertAddress).then(c => { if (c) addM('shared', c.lat, c.lng, `<strong>Nachspeise-Ort</strong><br/><small>${config.dessertAddress}</small>`) }))
+      }
       Promise.all(tasks).then(() => {
         if (points.length > 0) map.fitBounds(L.latLngBounds(points), { padding: [40, 40] })
         const encoded = btoa(JSON.stringify({ points, config: { dessertAddress: config.dessertAddress } }))
@@ -1362,7 +1454,9 @@ function RoutesTab({ plan, config, compact = false }) {
 
       const starterCoord = plan.teamCoords[team.groups?.starter?.host?.id]
       const mainCoord    = plan.teamCoords[team.groups?.main?.host?.id]
-      const dessertCoord = plan.dessertCoord
+      const dessertCoord = plan.dessertMode === 'distributed'
+        ? (plan.teamCoords[team.groups?.dessert?.host?.id] || null)
+        : plan.dessertCoord
       const waypoints    = [homeCoord, starterCoord, mainCoord, dessertCoord].filter(Boolean)
 
       if (waypoints.length >= 2) {
@@ -1595,7 +1689,7 @@ function Step5({ plan, teams, config, onBack }) {
 
   const messages = plan.teams.map(team => ({ team, text: buildMessage(team, plan, { ...config, date: dateStr }) }))
   const validation = validatePlan(plan)
-  const distStats = plan.teamCoords ? calculateTotalDistance(plan, plan.teamCoords, plan.dessertCoord) : null
+  const distStats = plan.teamCoords ? calculateTotalDistance(plan, plan.teamCoords, plan.dessertCoord, plan.dessertMode) : null
   const teamsWithAllergies = plan.teams.filter(t => t.allergies && t.allergies.trim())
 
   // PDF: plan table
@@ -1684,6 +1778,7 @@ function Step5({ plan, teams, config, onBack }) {
                   <th className="pb-3 pr-4 font-semibold">Kocht</th>
                   <th className="pb-3 pr-4 font-semibold">🥗 Vorspeise bei</th>
                   <th className="pb-3 pr-4 font-semibold">🍝 Hauptspeise bei</th>
+                  {plan.dessertMode === 'distributed' && <th className="pb-3 pr-4 font-semibold">🍰 Nachspeise bei</th>}
                   <th className="pb-3 font-semibold">Ernährung</th>
                 </tr>
               </thead>
@@ -1694,6 +1789,7 @@ function Step5({ plan, teams, config, onBack }) {
                     <td className="py-3 pr-4 text-gray-500">{courseLabels[team.hostCourse]}</td>
                     <td className="py-3 pr-4">{team.groups.starter?.host?.names || '—'}</td>
                     <td className="py-3 pr-4">{team.groups.main?.host?.names || '—'}</td>
+                    {plan.dessertMode === 'distributed' && <td className="py-3 pr-4">{team.groups.dessert?.host?.names || '—'}</td>}
                     <td className="py-3">
                       <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${team.diet === 'vegan' ? 'bg-green-100 text-green-700' : team.diet === 'vegetarisch' ? 'bg-lime-100 text-lime-700' : 'bg-gray-100 text-gray-500'}`}>{team.diet}</span>
                       {team.allergies && <span className="ml-1 text-xs text-orange-500">⚠️</span>}

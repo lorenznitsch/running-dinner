@@ -30,6 +30,7 @@ export function parseCSV(text) {
   const colPhone  = findCol('telefon', 'phone', 'handy', 'nummer', 'mobile', 'whatsapp')
   const colEmail  = findCol('e-mail-adresse', 'email address', 'e-mail', 'email', 'mail', 'e_mail')
   const colEmail2 = findCol('e-mail 2', 'email2', 'e-mail2', 'zweite mail', 'second email')
+  const colGroupSize = findCol('group_size', 'gruppengröße', 'gruppengroesse', 'personenzahl', 'personen')
 
   const teams = []
   for (let i = 1; i < lines.length; i++) {
@@ -50,9 +51,20 @@ export function parseCSV(text) {
     if (dietRaw.includes('vegan')) diet = 'vegan'
     else if (dietRaw.includes('vegetar')) diet = 'vegetarisch'
 
+    // Determine group size: from column, or count name parts (Tim & Anna & Sophie = 3)
+    let groupSize = 2
+    if (colGroupSize !== -1 && row[colGroupSize]) {
+      const gs = parseInt(row[colGroupSize], 10)
+      if (!isNaN(gs) && gs >= 2) groupSize = gs
+    } else {
+      const nameParts = names.split(/[&,+]/).filter(p => p.trim())
+      if (nameParts.length >= 3) groupSize = 3
+    }
+
     teams.push({
       id: i,
       names: names.trim(),
+      groupSize,
       diet,
       allergies: colAllergies !== -1 ? row[colAllergies] : '',
       address: colAddress !== -1 ? row[colAddress] : '',
@@ -206,10 +218,11 @@ export function getRequiredDiet(tischTeams) {
 }
 
 export function buildMessage(team, plan, config) {
-  const { date, timeStarter, timeMain, timeDessert, dessertAddress, dessertDoorbell, contacts, whatsappLink } = config
+  const { date, timeStarter, timeMain, timeDessert, dessertAddress, dessertDoorbell, contacts, whatsappLink, dessertMode } = config
 
   const starterGroup = team.groups.starter
   const mainGroup    = team.groups.main
+  const dessertGroup = team.groups.dessert
 
   const getAddress  = (group) => group ? (group.host.address || group.host.names) : 'TBD'
   const getDoorbell = (group) => group ? (group.host.doorbell || group.host.names) : ''
@@ -218,27 +231,35 @@ export function buildMessage(team, plan, config) {
   const courseLabels  = { starter: 'Vorspeise', main: 'Hauptspeise', dessert: 'Nachspeise' }
   const cookLabel     = courseLabels[cookingCourse] || ''
 
+  // Dessert location depends on mode
+  const isDistributed = dessertMode === 'distributed'
+  const dessertAddr  = isDistributed ? getAddress(dessertGroup) : (dessertAddress || 'Gemeinsamer Ort')
+  const dessertDbell = isDistributed ? getDoorbell(dessertGroup) : (dessertDoorbell || '')
+
   // Determine required diet from all teams at the cooking table
   let cookingGroup = null
   if (cookingCourse === 'starter') cookingGroup = starterGroup
   else if (cookingCourse === 'main') cookingGroup = mainGroup
+  else if (cookingCourse === 'dessert' && isDistributed) cookingGroup = dessertGroup
 
   let requiredDiet = 'omnivor'
   let allergiesAtTable = []
+  let personCount = 6
 
   if (cookingGroup) {
     const tischTeams = [cookingGroup.host, ...cookingGroup.guests]
     requiredDiet = getRequiredDiet(tischTeams)
     allergiesAtTable = tischTeams.filter(t => t.allergies && t.allergies.trim() && t.id !== team.id).map(t => t.allergies.trim())
-  } else if (cookingCourse === 'dessert') {
-    // All teams come to dessert — use most restrictive across all
+    personCount = tischTeams.reduce((s, t) => s + (t.groupSize || 2), 0)
+  } else if (cookingCourse === 'dessert' && !isDistributed) {
+    // Shared dessert — all teams
     requiredDiet = getRequiredDiet(plan.teams)
     allergiesAtTable = plan.teams.filter(t => t.allergies && t.allergies.trim() && t.id !== team.id).map(t => t.allergies.trim())
+    personCount = plan.teams.reduce((s, t) => s + (t.groupSize || 2), 0)
   }
 
   const dietAdj = requiredDiet === 'vegan' ? 'vegane' : requiredDiet === 'vegetarisch' ? 'vegetarische' : ''
   const allergyNote = allergiesAtTable.length > 0 ? ` – bitte ohne ${allergiesAtTable.join(', ')} (Allergie/Unverträglichkeit eines Gastes)` : ''
-  const personCount = 6
 
   const cookingLine = dietAdj
     ? `👩‍🍳 Bitte bereitet eine ${dietAdj} ${cookLabel}${allergyNote} für ca. ${personCount} Personen vor.`
@@ -253,7 +274,7 @@ Hier kommt euer persönlicher Plan für das Running Dinner am ${date} 🍽️
 
 🥗 Vorspeise: ${timeStarter} Uhr bei ${getAddress(starterGroup)}, Klingeln bei: ${getDoorbell(starterGroup)}
 🍝 Hauptspeise: ${timeMain} Uhr bei ${getAddress(mainGroup)}, Klingeln bei: ${getDoorbell(mainGroup)}
-🍰 Nachspeise: ${timeDessert} Uhr bei ${dessertAddress || 'Gemeinsamer Ort'}, Klingeln bei: ${dessertDoorbell || ''}
+🍰 Nachspeise: ${timeDessert} Uhr bei ${dessertAddr}, Klingeln bei: ${dessertDbell}
 
 ⏱️ Bitte plant für den Ortswechsel ca. 20–30 Minuten ein.
 

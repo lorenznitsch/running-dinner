@@ -121,7 +121,7 @@ export function hasConflict(teamA, teamB, metWith) {
  *   dessert location. When provided, hosts are chosen greedily (closest to dessert → Hauptspeise,
  *   next closest → Vorspeise) to minimise the last travel leg for all guests.
  */
-export function assignTeams(teams, distMatrix = null, hostOverrides = {}, maxIter = 1000, dessertDistances = null) {
+export function assignTeams(teams, distMatrix = null, hostOverrides = {}, maxIter = 1000, dessertDistances = null, dessertMode = 'shared') {
   const n = teams.length
   if (n < 3) throw new Error('Mindestens 3 Teams erforderlich')
 
@@ -137,9 +137,9 @@ export function assignTeams(teams, distMatrix = null, hostOverrides = {}, maxIte
   const targetSize = Math.floor(n / 3)
   const unassigned = teams.filter(t => !hostCourseMap[t.id])
 
-  if (dessertDistances && Object.keys(dessertDistances).length > 0) {
-    // Greedy: teams closest to dessert become Hauptspeise hosts (minimises last leg main→dessert).
-    // Next closest become Vorspeise hosts. The rest are Nachspeise-Vorbereiter.
+  if (dessertMode === 'shared' && dessertDistances && Object.keys(dessertDistances).length > 0) {
+    // Greedy: teams closest to shared dessert become Hauptspeise hosts (minimises last leg main→dessert).
+    // Next closest become Vorspeise hosts. The rest are Nachspeise-Vorbereiter (don't host).
     unassigned.sort((a, b) => (dessertDistances[a.id] ?? Infinity) - (dessertDistances[b.id] ?? Infinity))
     for (const team of unassigned) {
       let course
@@ -154,7 +154,7 @@ export function assignTeams(teams, distMatrix = null, hostOverrides = {}, maxIte
       courseCounts[course]++
     }
   } else {
-    // Random round-robin (no coords available)
+    // Random round-robin (distributed dessert mode or no coords available)
     unassigned.sort(() => Math.random() - 0.5)
     let courseIdx = 0
     for (const team of unassigned) {
@@ -185,7 +185,8 @@ export function assignTeams(teams, distMatrix = null, hostOverrides = {}, maxIte
   const groups = { starter: [], main: [], dessert: [] }
   let warning = null
 
-  for (const course of ['starter', 'main']) {
+  const coursesToBuild = dessertMode === 'distributed' ? ['starter', 'main', 'dessert'] : ['starter', 'main']
+  for (const course of coursesToBuild) {
     const hosts = hostGroups[course]
     // Other teams are guests for this course
     const guestPool = teams.filter(t => hostCourseMap[t.id] !== course)
@@ -239,7 +240,7 @@ export function assignTeams(teams, distMatrix = null, hostOverrides = {}, maxIte
   // Count diet-compatible groups (all members share the same dietary form)
   let dietCompatible = 0
   let totalGroups = 0
-  for (const course of ['starter', 'main']) {
+  for (const course of coursesToBuild) {
     for (const group of (groups[course] || [])) {
       totalGroups++
       if ([group.host, ...group.guests].every(m => m.diet === group.host.diet)) {
@@ -353,9 +354,11 @@ export function validatePlan(plan) {
 /**
  * Estimate travel distance per team using the two relevant legs:
  *   Vorspeise-Host → Hauptspeise-Host  +  Hauptspeise-Host → Nachspeise
- * (The home→Vorspeise leg is excluded — hosts don't travel to themselves.)
+ *
+ * In distributed mode, the dessert coord is looked up from teamCoords via the dessert host.
+ * In shared mode, the single dessertCoord is used.
  */
-export function calculateTotalDistance(plan, teamCoords, dessertCoord) {
+export function calculateTotalDistance(plan, teamCoords, dessertCoord, dessertMode = 'shared') {
   let total = 0
   let counted = 0
 
@@ -365,9 +368,14 @@ export function calculateTotalDistance(plan, teamCoords, dessertCoord) {
     if (!starterCoord || !mainCoord) continue
 
     const leg1 = haversineDistance(starterCoord, mainCoord)
-    const leg2 = dessertCoord ? haversineDistance(mainCoord, dessertCoord) : 0
 
-    if (leg1 !== Infinity && (leg2 !== Infinity || !dessertCoord)) {
+    let effectiveDessertCoord = dessertCoord
+    if (dessertMode === 'distributed') {
+      effectiveDessertCoord = teamCoords[team.groups?.dessert?.host?.id] || null
+    }
+    const leg2 = effectiveDessertCoord ? haversineDistance(mainCoord, effectiveDessertCoord) : 0
+
+    if (leg1 !== Infinity && (leg2 !== Infinity || !effectiveDessertCoord)) {
       total += leg1 + leg2
       counted++
     }

@@ -89,6 +89,7 @@ export default function AdminPage() {
     const teams = responses.map((r, i) => ({
       id: i + 1,
       names: r.names,
+      groupSize: r.group_size || 2,
       email: r.email || '',
       email2: r.email2 || '',
       diet: r.diet || 'omnivor',

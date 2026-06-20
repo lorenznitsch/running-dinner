@@ -28,6 +28,15 @@ const T = {
     ],
     names: 'Eure Namen',
     namesPlaceholder: 'z.B. Tim & Anna',
+    groupSizeLabel: 'Wie viele Personen nehmt ihr teil?',
+    groupSize2: '2 Personen',
+    groupSize3: '3 Personen',
+    name3: 'Name Gast 3',
+    name3Placeholder: 'z.B. Sophie',
+    phone3: 'Handynummer Gast 3',
+    phone3Placeholder: '0176 99887766',
+    email3: 'E-Mail Gast 3',
+    email3Placeholder: 'dritte@email.de',
     email1: 'E-Mail-Adresse Gast 1',
     email1Placeholder: 'beispiel@email.de',
     email2: 'E-Mail-Adresse Gast 2',
@@ -90,6 +99,15 @@ const T = {
     ],
     names: 'Your names',
     namesPlaceholder: 'e.g. Tim & Anna',
+    groupSizeLabel: 'How many people are participating?',
+    groupSize2: '2 people',
+    groupSize3: '3 people',
+    name3: 'Name guest 3',
+    name3Placeholder: 'e.g. Sophie',
+    phone3: 'Mobile number guest 3',
+    phone3Placeholder: '+49 176 99887766',
+    email3: 'Email guest 3',
+    email3Placeholder: 'third@email.com',
     email1: 'Email address guest 1',
     email1Placeholder: 'example@email.com',
     email2: 'Email address guest 2',
@@ -216,6 +234,10 @@ export default function SurveyPage() {
 
   const [form, setForm] = useState({
     names: '',
+    groupSize: 2,
+    name3: '',
+    phone3: '',
+    email3: '',
     email1: '',
     email2: '',
     phone1: '',
@@ -263,6 +285,10 @@ export default function SurveyPage() {
       const { error: dbError } = await supabase.from('responses').insert({
         survey_id: surveyId,
         names: form.names.trim(),
+        group_size: Number(form.groupSize),
+        name3:  form.groupSize === 3 ? (form.name3.trim()  || null) : null,
+        phone3: form.groupSize === 3 ? (form.phone3.trim() || null) : null,
+        email3: form.groupSize === 3 ? (form.email3.trim() || null) : null,
         email: form.email1.trim(),       // legacy column
         email2: form.email2.trim() || null,
         phone: form.phone1.trim(),       // legacy column
@@ -407,6 +433,53 @@ export default function SurveyPage() {
                 value={form.names} onChange={e => set('names', e.target.value)}
                 required className={inputCls} />
             </Field>
+
+            {/* Gruppengröße */}
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-3">
+                {t.groupSizeLabel} <span className="text-red-400">*</span>
+              </label>
+              <div className="flex gap-3">
+                {[2, 3].map(n => (
+                  <label key={n}
+                    className="flex-1 cursor-pointer rounded-xl border-2 p-4 text-center transition-all"
+                    style={{
+                      borderColor: form.groupSize === n ? ACCENT : '#e5e7eb',
+                      backgroundColor: form.groupSize === n ? '#f0fdf6' : 'white',
+                    }}>
+                    <input type="radio" name="groupSize" value={n}
+                      checked={form.groupSize === n} onChange={() => set('groupSize', n)}
+                      className="sr-only" />
+                    <div className="text-2xl mb-1">{n === 2 ? '👫' : '👨‍👩‍👧'}</div>
+                    <div className="text-sm font-semibold text-gray-800">{n === 2 ? t.groupSize2 : t.groupSize3}</div>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* 3. Person (nur wenn 3 Personen) */}
+            {form.groupSize === 3 && (
+              <div className="bg-green-50 border border-green-200 rounded-xl p-4 space-y-4">
+                <p className="text-xs font-semibold text-green-800">Angaben zur 3. Person</p>
+                <Field label={t.name3} required optional={t.optional}>
+                  <input type="text" placeholder={t.name3Placeholder}
+                    value={form.name3} onChange={e => set('name3', e.target.value)}
+                    className={inputCls} />
+                </Field>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label={t.phone3} required={false} optional={t.optional}>
+                    <input type="tel" placeholder={t.phone3Placeholder}
+                      value={form.phone3} onChange={e => set('phone3', e.target.value)}
+                      className={inputCls} />
+                  </Field>
+                  <Field label={t.email3} required={false} optional={t.optional}>
+                    <input type="email" placeholder={t.email3Placeholder}
+                      value={form.email3} onChange={e => set('email3', e.target.value)}
+                      className={inputCls} />
+                  </Field>
+                </div>
+              </div>
+            )}
 
             {/* E-Mails */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
