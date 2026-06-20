@@ -5,7 +5,7 @@ import { supabase } from '../lib/supabase'
 const ACCENT = '#1D9E75'
 
 function exportCsv(responses, eventName) {
-  const header = ['Namen', 'E-Mail', 'Ernährung', 'Allergien', 'Adresse 1', 'Klingelschild 1', 'Adresse 2', 'Klingelschild 2', 'Telefon 1', 'Telefon 2', 'Hinweise']
+  const header = ['Namen', 'Gruppengröße', 'E-Mail', 'Ernährung', 'Allergien', 'Adresse 1', 'Klingelschild 1', 'Adresse 2', 'Klingelschild 2', 'Telefon 1', 'Telefon 2', 'Hinweise', 'Name Gast 3', 'Handynummer Gast 3', 'E-Mail Gast 3']
   const rows = responses.map(r => {
     const addr1 = r.street1
       ? `${r.street1} ${r.housenumber1 || ''}, ${r.zip1 || ''} ${r.city1 || ''}`.trim()
@@ -14,10 +14,11 @@ function exportCsv(responses, eventName) {
       ? `${r.street2} ${r.housenumber2 || ''}, ${r.zip2 || ''} ${r.city2 || ''}`.trim()
       : ''
     return [
-      r.names, r.email || '', r.diet, r.allergies || '',
+      r.names, r.group_size || 2, r.email || '', r.diet, r.allergies || '',
       addr1, r.doorbell1 || r.doorbell || '',
       addr2, r.doorbell2 || '',
       r.phone1 || r.phone || '', r.phone2 || '', r.notes || '',
+      r.name3 || '', r.phone3 || '', r.email3 || '',
     ]
   })
   const csv = [header, ...rows]
@@ -90,6 +91,9 @@ export default function AdminPage() {
       id: i + 1,
       names: r.names,
       groupSize: r.group_size || 2,
+      name3: r.name3 || '',
+      phone3: r.phone3 || '',
+      email3: r.email3 || '',
       email: r.email || '',
       email2: r.email2 || '',
       diet: r.diet || 'omnivor',

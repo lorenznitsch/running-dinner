@@ -1542,12 +1542,23 @@ function RoutesTab({ plan, config, compact = false }) {
     })
   }
 
-  const wpLabels = (team) => [
-    { emoji: '🏠', label: `Start: ${team.address || team.names}` },
-    { emoji: '🥗', label: `Vorspeise: ${team.groups?.starter?.host?.address || team.groups?.starter?.host?.names || '?'}` },
-    { emoji: '🍝', label: `Hauptspeise: ${team.groups?.main?.host?.address || team.groups?.main?.host?.names || '?'}` },
-    { emoji: '🍰', label: `Nachspeise: ${config.dessertAddress || 'Gemeinsamer Ort'}` },
-  ]
+  const wpLabels = (team) => {
+    let dessertLabel
+    if (plan.dessertMode === 'distributed') {
+      const dHost = team.groups?.dessert?.host
+      dessertLabel = dHost
+        ? `${dHost.address || dHost.names} (bei ${dHost.names})`
+        : '?'
+    } else {
+      dessertLabel = `${config.dessertAddress || 'Gemeinsamer Ort'} (gemeinsamer Ort)`
+    }
+    return [
+      { emoji: '🏠', label: `Start: ${team.address || team.names}` },
+      { emoji: '🥗', label: `Vorspeise: ${team.groups?.starter?.host?.address || team.groups?.starter?.host?.names || '?'}` },
+      { emoji: '🍝', label: `Hauptspeise: ${team.groups?.main?.host?.address || team.groups?.main?.host?.names || '?'}` },
+      { emoji: '🍰', label: `Nachspeise: ${dessertLabel}` },
+    ]
+  }
 
   if (!plan.teamCoords) {
     return (

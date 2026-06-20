@@ -30,7 +30,7 @@ export function parseCSV(text) {
   const colPhone  = findCol('telefon', 'phone', 'handy', 'nummer', 'mobile', 'whatsapp')
   const colEmail  = findCol('e-mail-adresse', 'email address', 'e-mail', 'email', 'mail', 'e_mail')
   const colEmail2 = findCol('e-mail 2', 'email2', 'e-mail2', 'zweite mail', 'second email')
-  const colGroupSize = findCol('group_size', 'gruppengröße', 'gruppengroesse', 'personenzahl', 'personen')
+  const colGroupSize = findCol('group_size', 'group size', 'gruppengröße', 'gruppengroesse', 'personenzahl', 'anzahl personen', 'personen')
 
   const teams = []
   for (let i = 1; i < lines.length; i++) {
