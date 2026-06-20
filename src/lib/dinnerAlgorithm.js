@@ -116,37 +116,55 @@ export function hasConflict(teamA, teamB, metWith) {
  * @param {number} [maxIter=1000]     max backtracking iterations before giving up
  * @returns {{ teams: Array, groups: Object, hostCourseMap: Object, warning: string|null }}
  */
-export function assignTeams(teams, distMatrix = null, hostOverrides = {}, maxIter = 1000) {
+/**
+ * @param {Object} [dessertDistances]  { [teamId]: km } — distance of each team to the shared
+ *   dessert location. When provided, hosts are chosen greedily (closest to dessert → Hauptspeise,
+ *   next closest → Vorspeise) to minimise the last travel leg for all guests.
+ */
+export function assignTeams(teams, distMatrix = null, hostOverrides = {}, maxIter = 1000, dessertDistances = null) {
   const n = teams.length
   if (n < 3) throw new Error('Mindestens 3 Teams erforderlich')
 
   // ── Assign host courses ──────────────────────────────────────────────────
-  // Start with overrides, then fill the rest
   const courses = ['starter', 'main', 'dessert']
   const hostCourseMap = { ...hostOverrides }
 
-  // Count how many are already assigned per course
   const courseCounts = { starter: 0, main: 0, dessert: 0 }
   for (const id of Object.keys(hostOverrides)) {
     courseCounts[hostOverrides[id]]++
   }
 
-  // Target size per course (roughly n/3)
   const targetSize = Math.floor(n / 3)
+  const unassigned = teams.filter(t => !hostCourseMap[t.id])
 
-  // Shuffle teams to randomise assignment order (reproducible for same session)
-  const unassigned = teams.filter(t => !hostCourseMap[t.id]).sort(() => Math.random() - 0.5)
-
-  // Round-robin fill remaining slots
-  let courseIdx = 0
-  for (const team of unassigned) {
-    // Skip this course if it is already full
-    while (courseCounts[courses[courseIdx]] >= targetSize && courseIdx < courses.length - 1) {
-      courseIdx++
+  if (dessertDistances && Object.keys(dessertDistances).length > 0) {
+    // Greedy: teams closest to dessert become Hauptspeise hosts (minimises last leg main→dessert).
+    // Next closest become Vorspeise hosts. The rest are Nachspeise-Vorbereiter.
+    unassigned.sort((a, b) => (dessertDistances[a.id] ?? Infinity) - (dessertDistances[b.id] ?? Infinity))
+    for (const team of unassigned) {
+      let course
+      if (courseCounts.main < targetSize) {
+        course = 'main'
+      } else if (courseCounts.starter < targetSize) {
+        course = 'starter'
+      } else {
+        course = 'dessert'
+      }
+      hostCourseMap[team.id] = course
+      courseCounts[course]++
     }
-    hostCourseMap[team.id] = courses[courseIdx]
-    courseCounts[courses[courseIdx]]++
-    courseIdx = (courseIdx + 1) % 3
+  } else {
+    // Random round-robin (no coords available)
+    unassigned.sort(() => Math.random() - 0.5)
+    let courseIdx = 0
+    for (const team of unassigned) {
+      while (courseCounts[courses[courseIdx]] >= targetSize && courseIdx < courses.length - 1) {
+        courseIdx++
+      }
+      hostCourseMap[team.id] = courses[courseIdx]
+      courseCounts[courses[courseIdx]]++
+      courseIdx = (courseIdx + 1) % 3
+    }
   }
 
   // Build a quick lookup: course → [team]
@@ -186,10 +204,9 @@ export function assignTeams(teams, distMatrix = null, hostOverrides = {}, maxIte
           return da - db
         })
 
-      // Backtracking: try all pairs
-      const guests = findGuestPair(host.id, candidates, metWith, maxIter)
-
-      // If backtracking failed, fall back to any two available
+      // Try diet-matched pair first (soft constraint), then fall back to any valid pair
+      const dietPair    = findGuestPairWithDiet(host.id, teamMap[host.id]?.diet, candidates, metWith, Math.floor(maxIter / 2))
+      const guests      = dietPair || findGuestPair(host.id, candidates, metWith, maxIter)
       const finalGuests = guests || fallbackPick(host.id, candidates)
 
       if (!guests) {
@@ -217,15 +234,38 @@ export function assignTeams(teams, distMatrix = null, hostOverrides = {}, maxIte
   }
 
   // Dessert is always at the shared organiser location — no host group is built.
-  // Teams with hostCourse='dessert' are "Nachspeise-Vorbereiter": guests at starter+main tables,
-  // they prepare dessert and bring it to the shared location.
+  // Teams with hostCourse='dessert' are "Nachspeise-Vorbereiter": guests at starter+main tables.
+
+  // Count diet-compatible groups (all members share the same dietary form)
+  let dietCompatible = 0
+  let totalGroups = 0
+  for (const course of ['starter', 'main']) {
+    for (const group of (groups[course] || [])) {
+      totalGroups++
+      if ([group.host, ...group.guests].every(m => m.diet === group.host.diet)) {
+        dietCompatible++
+      }
+    }
+  }
 
   return {
     teams: Object.values(teamMap),
     groups,          // { starter: [...], main: [...], dessert: [] }
     hostCourseMap,
     warning,
+    dietStats: { compatible: dietCompatible, total: totalGroups },
   }
+}
+
+/**
+ * Try to find a diet-matched guest pair (all three share the same dietary form).
+ * Returns [guest1, guest2] or null if no such pair found.
+ */
+function findGuestPairWithDiet(hostId, hostDiet, candidates, metWith, maxIter) {
+  if (!hostDiet) return null
+  const dietCandidates = candidates.filter(c => c.diet === hostDiet)
+  if (dietCandidates.length < 2) return null
+  return findGuestPair(hostId, dietCandidates, metWith, maxIter)
 }
 
 /**
@@ -310,26 +350,25 @@ export function validatePlan(plan) {
  * @param {{lat: number, lng: number}|null} dessertCoord
  * @returns {{ totalKm: number, avgKmPerTeam: number }}
  */
+/**
+ * Estimate travel distance per team using the two relevant legs:
+ *   Vorspeise-Host → Hauptspeise-Host  +  Hauptspeise-Host → Nachspeise
+ * (The home→Vorspeise leg is excluded — hosts don't travel to themselves.)
+ */
 export function calculateTotalDistance(plan, teamCoords, dessertCoord) {
   let total = 0
   let counted = 0
 
   for (const team of plan.teams) {
-    const home = teamCoords[team.id]
-    if (!home) continue
-
     const starterCoord = teamCoords[team.groups?.starter?.host?.id]
     const mainCoord    = teamCoords[team.groups?.main?.host?.id]
+    if (!starterCoord || !mainCoord) continue
 
-    const legs = [
-      haversineDistance(home, starterCoord),
-      haversineDistance(starterCoord, mainCoord),
-      haversineDistance(mainCoord, dessertCoord),
-      haversineDistance(dessertCoord, home),
-    ].filter(d => d !== Infinity)
+    const leg1 = haversineDistance(starterCoord, mainCoord)
+    const leg2 = dessertCoord ? haversineDistance(mainCoord, dessertCoord) : 0
 
-    if (legs.length === 4) {
-      total += legs.reduce((s, d) => s + d, 0)
+    if (leg1 !== Infinity && (leg2 !== Infinity || !dessertCoord)) {
+      total += leg1 + leg2
       counted++
     }
   }

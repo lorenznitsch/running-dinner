@@ -249,12 +249,21 @@ function Step3({ teams, config, onNext, onBack }) {
         (done, tot) => setGeoProgress({ done, total: tot })
       )
 
-      // 2. Build distance matrix
+      // 2. Build distance matrix + dessert distances for greedy host selection
       setPhase('assigning')
       const distMatrix = buildDistanceMatrix(teams, teamCoords)
 
-      // 3. Run backtracking assignment
-      const result = assignTeams(teams, distMatrix)
+      const dessertDistances = {}
+      if (dessertCoord) {
+        for (const team of teams) {
+          if (teamCoords[team.id]) {
+            dessertDistances[team.id] = haversineDistance(teamCoords[team.id], dessertCoord)
+          }
+        }
+      }
+
+      // 3. Run backtracking assignment with greedy host selection
+      const result = assignTeams(teams, distMatrix, {}, 1000, dessertDistances)
 
       // 4. Attach coordinates + distMatrix to result for later use
       result.teamCoords = teamCoords
@@ -326,132 +335,249 @@ function Step3({ teams, config, onNext, onBack }) {
   )
 }
 
-// ─── Step 4 helpers ───────────────────────────────────────────────────────────
-const COURSE_COLORS = { starter: '#3b82f6', main: '#8b5cf6', dessert: '#f97316' }
-const DIET_COLORS   = { vegan: 'bg-green-100 text-green-700', vegetarisch: 'bg-lime-100 text-lime-700', omnivor: 'bg-gray-100 text-gray-500' }
+// ─── Step 4 Map (uses pre-computed coords, filterable) ────────────────────────
+const S4_CAT = [
+  { key: 'starter',    label: 'Vorspeise-Hosts',  color: '#3b82f6' },
+  { key: 'main',       label: 'Hauptspeise-Hosts', color: '#8b5cf6' },
+  { key: 'shared',     label: 'Nachspeise-Ort',   color: '#1D9E75' },
+  { key: 'unselected', label: 'Nicht ausgewählt',  color: '#9ca3af' },
+]
 
-function CourseSelect({ value, onChange }) {
-  return (
-    <select
-      value={value}
-      onChange={e => onChange(e.target.value)}
-      className="text-xs border border-gray-200 rounded px-1.5 py-1 bg-white text-gray-600 flex-shrink-0 cursor-pointer hover:border-gray-300 transition-colors"
-      title="Gang wechseln"
-    >
-      <option value="starter">🥗 Vorspeise</option>
-      <option value="main">🍝 Hauptspeise</option>
-      <option value="dessert">🍰 Nachspeise</option>
-    </select>
-  )
-}
+function Step4MapView({ plan, config }) {
+  const mapRef  = useRef(null)
+  const mapInst = useRef(null)
+  const markRef = useRef({ starter: [], main: [], shared: [], unselected: [] })
+  const [vis, setVis] = useState({ starter: true, main: true, shared: true, unselected: true })
 
-function GroupCard({ group, hostCourseMap, changeCourse }) {
-  const host = group.host
+  useEffect(() => {
+    if (!window.L || !mapRef.current || !plan.teamCoords) return
+    if (mapInst.current) { mapInst.current.remove(); mapInst.current = null }
+    markRef.current = { starter: [], main: [], shared: [], unselected: [] }
+
+    const L = window.L
+    const map = L.map(mapRef.current).setView([52.52, 13.405], 12)
+    mapInst.current = map
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OpenStreetMap', maxZoom: 19 }).addTo(map)
+
+    const points = []
+    const catColors = Object.fromEntries(S4_CAT.map(c => [c.key, c.color]))
+    const mkIcon = (color, small) => {
+      const [w, h] = small ? [20, 28] : [26, 36]
+      return L.icon({ iconUrl: createSvgIcon(color), iconSize: [w, h], iconAnchor: [w/2, h], popupAnchor: [0, -h] })
+    }
+    const addM = (cat, lat, lng, popup) => {
+      const m = L.marker([lat, lng], { icon: mkIcon(catColors[cat], cat === 'unselected') }).bindPopup(popup)
+      m.addTo(map) // always add; filter will hide if vis[cat]=false below
+      markRef.current[cat].push(m)
+      points.push([lat, lng])
+    }
+
+    const hostIds = new Set()
+    for (const course of ['starter', 'main']) {
+      for (const g of (plan.groups[course] || [])) {
+        if (hostIds.has(g.host.id)) continue
+        hostIds.add(g.host.id)
+        const c = plan.teamCoords[g.host.id]
+        if (c) addM(course, c.lat, c.lng, `<strong>${g.host.names}</strong><br/>${course === 'starter' ? 'Vorspeise' : 'Hauptspeise'}<br/><small>${g.host.address || ''}</small>`)
+      }
+    }
+    if (plan.dessertCoord) {
+      addM('shared', plan.dessertCoord.lat, plan.dessertCoord.lng, `<strong>Nachspeise-Ort</strong><br/><small>${config.dessertAddress || ''}</small>`)
+    }
+    for (const team of plan.teams) {
+      if (hostIds.has(team.id)) continue
+      const c = plan.teamCoords[team.id]
+      if (c) addM('unselected', c.lat, c.lng, `<strong>${team.names}</strong><br/>Gast (nicht ausgewählt)<br/><small>${team.address || ''}</small>`)
+    }
+
+    if (points.length > 0) map.fitBounds(L.latLngBounds(points), { padding: [30, 30] })
+    return () => { if (mapInst.current) { mapInst.current.remove(); mapInst.current = null } }
+  }, [plan, config])
+
+  const toggleCat = (cat) => {
+    const nv = { ...vis, [cat]: !vis[cat] }
+    setVis(nv)
+    ;(markRef.current[cat] || []).forEach(m => { if (nv[cat]) m.addTo(mapInst.current); else m.remove() })
+  }
+
+  if (!plan.teamCoords) return <p className="text-sm text-gray-400 py-4 text-center">Keine Koordinaten – Plan neu generieren.</p>
+
   return (
-    <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-      {/* Host row */}
-      <div className="px-3 py-2 bg-gray-50 border-b border-gray-100">
-        <div className="flex items-center gap-1.5 justify-between">
-          <div className="flex items-center gap-1.5 min-w-0 flex-1">
-            <span className="text-xs px-1.5 py-0.5 rounded font-bold text-white flex-shrink-0" style={{ backgroundColor: COURSE_COLORS[group.course] }}>Host</span>
-            <span className="text-sm font-semibold text-gray-900 truncate">{host.names}</span>
-          </div>
-          <CourseSelect value={hostCourseMap[host.id]} onChange={v => changeCourse(host.id, v)} />
-        </div>
-        {host.address && <p className="text-xs text-gray-400 mt-0.5 truncate">{host.address}</p>}
-      </div>
-      {/* Guests */}
-      <div className="px-3 py-2 space-y-1.5">
-        {group.guests.map(guest => (
-          <div key={guest.id} className="flex items-center gap-2 justify-between">
-            <span className="text-sm text-gray-700 truncate flex-1">{guest.names}</span>
-            <div className="flex items-center gap-1 flex-shrink-0">
-              <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${DIET_COLORS[guest.diet] || DIET_COLORS.omnivor}`}>{guest.diet}</span>
-              <CourseSelect value={hostCourseMap[guest.id]} onChange={v => changeCourse(guest.id, v)} />
-            </div>
-          </div>
+    <div>
+      <div className="flex flex-wrap gap-2 mb-3">
+        {S4_CAT.map(({ key, label, color }) => (
+          <button key={key} onClick={() => toggleCat(key)}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-all"
+            style={{ borderColor: vis[key] ? color : '#d1d5db', backgroundColor: vis[key] ? color + '18' : 'white', color: vis[key] ? color : '#9ca3af' }}>
+            <div style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: vis[key] ? color : '#d1d5db' }} />{label}
+          </button>
         ))}
       </div>
+      <div ref={mapRef} style={{ height: 300, borderRadius: 12, overflow: 'hidden', border: '1px solid #e5e7eb' }} />
     </div>
   )
 }
 
-// ─── Step 4: Manual Adjustment ────────────────────────────────────────────────
+// ─── Step 4: Interactive Table ─────────────────────────────────────────────────
 function Step4ManualAdjustment({ plan, config, onNext, onBack }) {
+  const [localPlan, setLocalPlan] = useState(plan)
   const [hostCourseMap, setHostCourseMap] = useState(() => {
     const map = {}
     for (const t of plan.teams) map[t.id] = t.hostCourse
     return map
   })
-  const [previewPlan, setPreviewPlan] = useState(plan)
+  const [swapPopup, setSwapPopup] = useState(null) // { teamId, newCourse, oldCourse, candidates }
+  const [mapOpen,    setMapOpen]    = useState(false)
+  const [routesOpen, setRoutesOpen] = useState(false)
 
-  const changeCourse = (teamId, newCourse) => {
-    const newMap = { ...hostCourseMap, [teamId]: newCourse }
-    setHostCourseMap(newMap)
+  const rebuildFromMap = (newMap) => {
     try {
-      const rebuilt = assignTeams(plan.teams.map(t => ({ ...t })), plan.distMatrix || null, newMap)
-      rebuilt.teamCoords  = plan.teamCoords
-      rebuilt.dessertCoord = plan.dessertCoord
-      rebuilt.distMatrix  = plan.distMatrix
-      setPreviewPlan(rebuilt)
-    } catch { /* ignore */ }
+      const r = assignTeams(plan.teams.map(t => ({ ...t })), plan.distMatrix || null, newMap)
+      r.teamCoords = plan.teamCoords; r.dessertCoord = plan.dessertCoord; r.distMatrix = plan.distMatrix
+      return r
+    } catch { return localPlan }
   }
 
-  const validation = validatePlan(previewPlan)
-  const byHostCourse = { starter: [], main: [], dessert: [] }
-  for (const t of previewPlan.teams) byHostCourse[t.hostCourse]?.push(t)
+  const handleKochtChange = (teamId, newCourse) => {
+    const oldCourse = localPlan.teams.find(t => t.id === teamId)?.hostCourse
+    if (oldCourse === newCourse) return
+    const candidates = localPlan.teams.filter(t => t.id !== teamId)
+    setSwapPopup({ teamId, newCourse, oldCourse, candidates })
+  }
+
+  const confirmSwap = (swapWithId) => {
+    const { teamId, newCourse, oldCourse } = swapPopup
+    const newMap = { ...hostCourseMap, [teamId]: newCourse, [swapWithId]: oldCourse }
+    setHostCourseMap(newMap)
+    setSwapPopup(null)
+    setLocalPlan(rebuildFromMap(newMap))
+  }
+
+  const swapInCourse = (course, movingTeamId, newHostId) => {
+    const groups = localPlan.groups[course]
+    if (!groups) return
+    const srcGroup = groups.find(g => g.guests.some(gu => gu.id === movingTeamId))
+    const dstGroup = groups.find(g => g.host.id === newHostId)
+    if (!srcGroup || !dstGroup || srcGroup === dstGroup) return
+    const movingTeam = srcGroup.guests.find(gu => gu.id === movingTeamId)
+    const swapTarget = dstGroup.guests[0]
+    if (!swapTarget || !movingTeam) return
+
+    const newGroups = {
+      ...localPlan.groups,
+      [course]: groups.map(g => {
+        if (g === srcGroup) return { ...g, guests: g.guests.map(gu => gu.id === movingTeamId ? swapTarget : gu) }
+        if (g === dstGroup) return { ...g, guests: g.guests.map(gu => gu.id === swapTarget.id ? movingTeam : gu) }
+        return g
+      }),
+    }
+    const coursGs = newGroups[course]
+    const newTeams = localPlan.teams.map(t => {
+      if (t.id === movingTeamId || t.id === swapTarget.id) {
+        const grp = coursGs.find(g => g.host.id === t.id || g.guests.some(gu => gu.id === t.id))
+        return { ...t, groups: { ...t.groups, [course]: grp || null } }
+      }
+      return t
+    })
+    setLocalPlan({ ...localPlan, groups: newGroups, teams: newTeams })
+  }
+
+  // Live stats
+  const validation  = validatePlan(localPlan)
+  const distStats   = localPlan.teamCoords ? calculateTotalDistance(localPlan, localPlan.teamCoords, localPlan.dessertCoord) : null
+  const allGroups   = [...(localPlan.groups.starter || []), ...(localPlan.groups.main || [])]
+  const dietOk      = allGroups.filter(g => [g.host, ...g.guests].every(m => m.diet === g.host.diet)).length
+  const groupSizes  = allGroups.map(g => 1 + g.guests.length)
+  const sizesUnique = [...new Set(groupSizes)]
+
+  const starterHosts = (localPlan.groups.starter || []).map(g => g.host)
+  const mainHosts    = (localPlan.groups.main    || []).map(g => g.host)
+
+  const DIET_COLOR  = { vegan: 'bg-green-100 text-green-700', vegetarisch: 'bg-lime-100 text-lime-700', omnivor: 'bg-gray-100 text-gray-500' }
+  const DIET_EMOJI  = { vegan: '🌱', vegetarisch: '🥗', omnivor: '🥩' }
+  const COURSE_LABEL = { starter: '🥗 Vorspeise', main: '🍝 Hauptspeise', dessert: '👤 Gast' }
 
   return (
     <div>
       <h2 className="text-2xl font-bold text-gray-900 mb-2">Plan überprüfen & anpassen</h2>
-      <p className="text-gray-500 mb-4 text-sm">Ändere den Gang eines Teams über das Dropdown neben seinem Namen – der Plan aktualisiert sich live.</p>
+      <p className="text-gray-500 mb-4 text-sm">Bearbeite Zuweisungen direkt in der Tabelle. Beim Wechsel der Koch-Rolle öffnet sich ein Tausch-Dialog.</p>
 
-      {/* Status row */}
-      <div className="flex flex-wrap gap-3 mb-6">
-        {validation.duplicates === 0 ? (
-          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold bg-green-100 text-green-700">✅ Keine doppelten Begegnungen</span>
-        ) : (
-          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold bg-red-100 text-red-700">⚠️ {validation.duplicates} doppelte Begegnung{validation.duplicates !== 1 ? 'en' : ''}</span>
-        )}
-        {plan.warning && (
-          <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-semibold bg-orange-100 text-orange-700">ℹ️ {plan.warning}</span>
-        )}
-        <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium bg-gray-100 text-gray-500">
-          {byHostCourse.starter.length}× 🥗 · {byHostCourse.main.length}× 🍝 · {byHostCourse.dessert.length}× 🍰
-        </span>
+      {/* ── Status bar ── */}
+      <div className="flex flex-wrap gap-2 mb-5 p-3 bg-gray-50 rounded-xl border border-gray-200 text-sm">
+        {validation.duplicates === 0
+          ? <span className="text-green-700 font-semibold">✅ Keine Doppelbegegnungen</span>
+          : <span className="text-red-700 font-semibold">⚠️ {validation.duplicates} Doppelbegegnung{validation.duplicates !== 1 ? 'en' : ''}</span>}
+        <span className="text-gray-400">·</span>
+        <span className="text-gray-600">Tischgröße: {sizesUnique.length === 1 ? `${sizesUnique[0]} Personen` : `${Math.min(...groupSizes)}–${Math.max(...groupSizes)} Personen`}</span>
+        {distStats && <><span className="text-gray-400">·</span><span className="text-blue-700">🗺️ Ø {distStats.avgKmPerTeam} km/Team</span></>}
+        <span className="text-gray-400">·</span>
+        <span className="text-purple-700">🥗 {dietOk}/{allGroups.length} Gruppen dietär kompatibel</span>
+        {localPlan.warning && <><span className="text-gray-400">·</span><span className="text-orange-600">ℹ️ {localPlan.warning}</span></>}
       </div>
 
-      {/* Summary table */}
-      <div className="overflow-x-auto mb-6 rounded-xl border border-gray-200">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 border-b border-gray-200">
-            <tr className="text-left text-xs text-gray-500 uppercase tracking-wide">
-              <th className="px-3 py-2.5 font-semibold">Team</th>
+      {/* ── Interactive spreadsheet table ── */}
+      <div className="overflow-x-auto mb-5 rounded-xl border border-gray-200">
+        <table className="w-full text-sm" style={{ borderCollapse: 'collapse' }}>
+          <thead className="bg-gray-50 border-b border-gray-200 text-left text-xs text-gray-500 uppercase tracking-wide">
+            <tr>
+              <th className="px-3 py-2.5 font-semibold sticky left-0 bg-gray-50" style={{ minWidth: 150 }}>Team</th>
+              <th className="px-3 py-2.5 font-semibold">Ernährung</th>
               <th className="px-3 py-2.5 font-semibold">Kocht</th>
               <th className="px-3 py-2.5 font-semibold">🥗 Vorspeise bei</th>
               <th className="px-3 py-2.5 font-semibold">🍝 Hauptspeise bei</th>
-              <th className="px-3 py-2.5 font-semibold">🍰 Nachspeise</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100">
-            {previewPlan.teams.map(team => {
+          <tbody>
+            {localPlan.teams.map(team => {
               const isStarterHost = team.groups?.starter?.host?.id === team.id
-              const isMainHost    = team.groups?.main?.host?.id === team.id
+              const isMainHost    = team.groups?.main?.host?.id    === team.id
+              const starterHostId = team.groups?.starter?.host?.id ?? ''
+              const mainHostId    = team.groups?.main?.host?.id    ?? ''
               return (
-                <tr key={team.id} className="hover:bg-gray-50">
-                  <td className="px-3 py-2 font-medium text-gray-900 whitespace-nowrap">{team.names}</td>
-                  <td className="px-3 py-2">
-                    <span className="text-xs px-2 py-0.5 rounded-full font-medium text-white" style={{ backgroundColor: COURSE_COLORS[team.hostCourse] }}>
-                      {{ starter: 'Vorspeise', main: 'Hauptspeise', dessert: 'Nachspeise' }[team.hostCourse]}
+                <tr key={team.id} className="border-b border-gray-100 hover:bg-blue-50/30 transition-colors">
+                  {/* Team */}
+                  <td className="px-3 py-2.5 font-semibold text-gray-900 sticky left-0 bg-white whitespace-nowrap" style={{ boxShadow: '2px 0 4px rgba(0,0,0,0.04)' }}>
+                    {team.names}
+                    {team.allergies && <span className="ml-1 text-xs text-orange-500" title={team.allergies}>⚠️</span>}
+                  </td>
+                  {/* Ernährung */}
+                  <td className="px-3 py-2.5">
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium whitespace-nowrap ${DIET_COLOR[team.diet] || DIET_COLOR.omnivor}`}>
+                      {DIET_EMOJI[team.diet] || ''} {team.diet}
                     </span>
                   </td>
-                  <td className="px-3 py-2 text-xs text-gray-600">
-                    {isStarterHost ? <span className="font-semibold text-blue-600">eigene Adresse</span> : (team.groups?.starter?.host?.names || '—')}
+                  {/* Kocht dropdown */}
+                  <td className="px-3 py-2.5">
+                    <select
+                      value={team.hostCourse}
+                      onChange={e => handleKochtChange(team.id, e.target.value)}
+                      className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-700 font-medium cursor-pointer hover:border-gray-300 focus:outline-none focus:ring-1"
+                    >
+                      <option value="starter">🥗 Vorspeise</option>
+                      <option value="main">🍝 Hauptspeise</option>
+                      <option value="dessert">👤 Gast</option>
+                    </select>
                   </td>
-                  <td className="px-3 py-2 text-xs text-gray-600">
-                    {isMainHost ? <span className="font-semibold text-purple-600">eigene Adresse</span> : (team.groups?.main?.host?.names || '—')}
+                  {/* Vorspeise bei */}
+                  <td className="px-3 py-2.5">
+                    {isStarterHost
+                      ? <span className="text-xs font-semibold text-blue-600">Eigene Adresse</span>
+                      : <select value={starterHostId} onChange={e => swapInCourse('starter', team.id, Number(e.target.value))}
+                          className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-700 cursor-pointer hover:border-gray-300 focus:outline-none focus:ring-1"
+                          disabled={starterHosts.length === 0}>
+                          {starterHosts.map(h => <option key={h.id} value={h.id}>{h.names}</option>)}
+                        </select>}
                   </td>
-                  <td className="px-3 py-2 text-xs text-gray-400">Gemeinsam</td>
+                  {/* Hauptspeise bei */}
+                  <td className="px-3 py-2.5">
+                    {isMainHost
+                      ? <span className="text-xs font-semibold text-purple-600">Eigene Adresse</span>
+                      : <select value={mainHostId} onChange={e => swapInCourse('main', team.id, Number(e.target.value))}
+                          className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-700 cursor-pointer hover:border-gray-300 focus:outline-none focus:ring-1"
+                          disabled={mainHosts.length === 0}>
+                          {mainHosts.map(h => <option key={h.id} value={h.id}>{h.names}</option>)}
+                        </select>}
+                  </td>
                 </tr>
               )
             })}
@@ -459,66 +585,58 @@ function Step4ManualAdjustment({ plan, config, onNext, onBack }) {
         </table>
       </div>
 
-      {/* Three-column group view */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
-
-        {/* Starter */}
-        <div>
-          <div className="flex items-center gap-1.5 mb-3">
-            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COURSE_COLORS.starter }} />
-            <span className="text-sm font-bold text-gray-700">🥗 Vorspeise</span>
-            <span className="text-xs text-gray-400 ml-auto">{byHostCourse.starter.length} Tische</span>
-          </div>
-          <div className="space-y-3">
-            {(previewPlan.groups?.starter || []).map((group, gi) => (
-              <GroupCard key={gi} group={group} hostCourseMap={hostCourseMap} changeCourse={changeCourse} />
-            ))}
-          </div>
-        </div>
-
-        {/* Main */}
-        <div>
-          <div className="flex items-center gap-1.5 mb-3">
-            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COURSE_COLORS.main }} />
-            <span className="text-sm font-bold text-gray-700">🍝 Hauptspeise</span>
-            <span className="text-xs text-gray-400 ml-auto">{byHostCourse.main.length} Tische</span>
-          </div>
-          <div className="space-y-3">
-            {(previewPlan.groups?.main || []).map((group, gi) => (
-              <GroupCard key={gi} group={group} hostCourseMap={hostCourseMap} changeCourse={changeCourse} />
-            ))}
-          </div>
-        </div>
-
-        {/* Dessert preparers */}
-        <div>
-          <div className="flex items-center gap-1.5 mb-3">
-            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COURSE_COLORS.dessert }} />
-            <span className="text-sm font-bold text-gray-700">🍰 Nachspeise</span>
-            <span className="text-xs text-gray-400 ml-auto">Vorbereiter</span>
-          </div>
-          <div className="bg-orange-50 border border-orange-200 rounded-xl p-3 mb-3 text-xs">
-            <p className="font-semibold text-orange-800 mb-0.5">Gemeinsamer Ort</p>
-            <p className="text-orange-700">{config.dessertAddress || '—'}</p>
-          </div>
-          <div className="space-y-2">
-            {byHostCourse.dessert.map(team => (
-              <div key={team.id} className="bg-white rounded-xl px-3 py-2.5 border border-gray-200 shadow-sm">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-sm font-semibold text-gray-900 truncate flex-1">{team.names}</span>
-                  <CourseSelect value={hostCourseMap[team.id]} onChange={v => changeCourse(team.id, v)} />
-                </div>
-                <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium mt-1 inline-block ${DIET_COLORS[team.diet] || DIET_COLORS.omnivor}`}>{team.diet}</span>
-                {team.allergies && <span className="ml-1 text-xs text-orange-500">⚠️</span>}
-              </div>
-            ))}
-          </div>
-        </div>
+      {/* ── Accordion: Karte ── */}
+      <div className="border border-gray-200 rounded-xl mb-3 overflow-hidden">
+        <button onClick={() => setMapOpen(o => !o)}
+          className="w-full px-4 py-3 text-left text-sm font-semibold text-gray-700 flex items-center justify-between hover:bg-gray-50 transition-colors">
+          <span>🗺️ Karte einblenden</span>
+          <span className="text-gray-400 text-xs">{mapOpen ? '▲ Einklappen' : '▼ Einblenden'}</span>
+        </button>
+        {mapOpen && <div className="border-t border-gray-200 p-4"><Step4MapView plan={localPlan} config={config} /></div>}
       </div>
+
+      {/* ── Accordion: Routen ── */}
+      <div className="border border-gray-200 rounded-xl mb-6 overflow-hidden">
+        <button onClick={() => setRoutesOpen(o => !o)}
+          className="w-full px-4 py-3 text-left text-sm font-semibold text-gray-700 flex items-center justify-between hover:bg-gray-50 transition-colors">
+          <span>🚲 Routen einblenden</span>
+          <span className="text-gray-400 text-xs">{routesOpen ? '▲ Einklappen' : '▼ Einblenden'}</span>
+        </button>
+        {routesOpen && <div className="border-t border-gray-200 p-4"><RoutesTab plan={localPlan} config={config} compact /></div>}
+      </div>
+
+      {/* ── Swap popup ── */}
+      {swapPopup && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl p-6 max-w-sm w-full max-h-[80vh] overflow-y-auto">
+            <h3 className="font-bold text-gray-900 text-lg mb-1">Gang wechseln</h3>
+            <p className="text-gray-500 text-sm mb-4">
+              <strong>{localPlan.teams.find(t => t.id === swapPopup.teamId)?.names}</strong> wird zu{' '}
+              <strong>{COURSE_LABEL[swapPopup.newCourse]}</strong>.
+              Wer übernimmt stattdessen <strong>{COURSE_LABEL[swapPopup.oldCourse]}</strong>?
+            </p>
+            <div className="space-y-2">
+              {swapPopup.candidates.map(t => (
+                <button key={t.id} onClick={() => confirmSwap(t.id)}
+                  className="w-full text-left px-4 py-3 rounded-xl border border-gray-200 hover:bg-gray-50 hover:border-gray-300 transition-colors">
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-gray-900">{t.names}</span>
+                    <span className="text-xs text-gray-400">{COURSE_LABEL[t.hostCourse]}</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setSwapPopup(null)}
+              className="mt-4 w-full py-2.5 rounded-xl text-sm font-semibold text-gray-500 border border-gray-200 hover:bg-gray-50 transition-colors">
+              Abbrechen
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="flex gap-3">
         <button onClick={onBack} className="flex-1 py-3 rounded-xl font-semibold text-gray-700 border border-gray-200 hover:bg-gray-50 transition-colors">← Zurück</button>
-        <button onClick={() => onNext(previewPlan)} className="flex-1 py-3 rounded-xl font-semibold text-white text-base transition-opacity" style={{ backgroundColor: ACCENT }}>
+        <button onClick={() => onNext(localPlan)} className="flex-1 py-3 rounded-xl font-semibold text-white text-base" style={{ backgroundColor: ACCENT }}>
           Plan bestätigen & Nachrichten erstellen →
         </button>
       </div>
@@ -564,10 +682,19 @@ function createSvgIcon(color) {
   return 'data:image/svg+xml;base64,' + btoa(svg)
 }
 
+const MAP_CATS = [
+  { key: 'starter',    label: 'Vorspeise-Hosts',   color: MARKER_COLORS.starter },
+  { key: 'main',       label: 'Hauptspeise-Hosts',  color: MARKER_COLORS.main },
+  { key: 'shared',     label: 'Nachspeise-Ort',     color: MARKER_COLORS.shared },
+  { key: 'unselected', label: 'Nicht ausgewählt',   color: '#9ca3af' },
+]
+
 function MapTab({ plan, config }) {
   const mapRef = useRef(null)
   const mapInstanceRef = useRef(null)
+  const markersRef = useRef({ starter: [], main: [], shared: [], unselected: [] })
   const [loading, setLoading] = useState(true)
+  const [visibleCats, setVisibleCats] = useState({ starter: true, main: true, shared: true, unselected: true })
   const [shareUrl, setShareUrl] = useState('')
   const [copied, setCopied] = useState(false)
   const [savingPdf, setSavingPdf] = useState(false)
@@ -575,65 +702,88 @@ function MapTab({ plan, config }) {
   useEffect(() => {
     if (!window.L || !mapRef.current) return
     if (mapInstanceRef.current) { mapInstanceRef.current.remove(); mapInstanceRef.current = null }
+    markersRef.current = { starter: [], main: [], shared: [], unselected: [] }
 
     const L = window.L
     const map = L.map(mapRef.current, { zoomControl: true }).setView([52.52, 13.405], 12)
     mapInstanceRef.current = map
-
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
       maxZoom: 19,
     }).addTo(map)
 
     const points = []
-    const addMarker = (address, name, course, color) => {
-      if (!address) return Promise.resolve()
-      return geocode(address).then(coords => {
-        if (!coords) return
-        points.push(coords)
-        const icon = L.icon({ iconUrl: createSvgIcon(color), iconSize: [28, 38], iconAnchor: [14, 38], popupAnchor: [0, -38] })
-        const courseLabel = { starter: 'Vorspeise', main: 'Hauptspeise', dessert: 'Nachspeise', shared: 'Gemeinsamer Nachspeise-Ort' }
-        L.marker([coords.lat, coords.lng], { icon })
-          .addTo(map)
-          .bindPopup(`<strong>${name}</strong><br/>${courseLabel[course]}<br/><small>${address}</small>`)
-      })
+    const visState = { starter: true, main: true, shared: true, unselected: true }
+
+    const mkIcon = (color, small) => {
+      const [w, h] = small ? [20, 28] : [28, 38]
+      return L.icon({ iconUrl: createSvgIcon(color), iconSize: [w, h], iconAnchor: [w/2, h], popupAnchor: [0, -h] })
+    }
+    const addM = (cat, lat, lng, popup) => {
+      const color = MAP_CATS.find(c => c.key === cat)?.color || '#9ca3af'
+      const m = L.marker([lat, lng], { icon: mkIcon(color, cat === 'unselected') }).bindPopup(popup)
+      m.addTo(map)
+      markersRef.current[cat].push(m)
+      points.push([lat, lng])
     }
 
-    // Geocode all hosts + shared dessert location
-    const tasks = []
-    const hostsAdded = new Set()
-
-    for (const course of ['starter', 'main']) {
-      for (const group of (plan.groups[course] || [])) {
-        const host = group.host
-        if (!hostsAdded.has(host.id)) {
-          hostsAdded.add(host.id)
-          tasks.push(addMarker(host.address, host.names, course, MARKER_COLORS[course]))
+    if (plan.teamCoords) {
+      // Fast path: use pre-computed coords
+      const hostIds = new Set()
+      for (const course of ['starter', 'main']) {
+        for (const g of (plan.groups[course] || [])) {
+          if (hostIds.has(g.host.id)) continue
+          hostIds.add(g.host.id)
+          const c = plan.teamCoords[g.host.id]
+          if (c) addM(course, c.lat, c.lng, `<strong>${g.host.names}</strong><br/>${course === 'starter' ? 'Vorspeise' : 'Hauptspeise'}<br/><small>${g.host.address || ''}</small>`)
         }
       }
-    }
-    tasks.push(addMarker(config.dessertAddress, 'Gemeinsamer Nachspeise-Ort', 'shared', MARKER_COLORS.shared))
-
-    Promise.all(tasks).then(() => {
-      setLoading(false)
-      if (points.length > 0) {
-        const bounds = L.latLngBounds(points.map(p => [p.lat, p.lng]))
-        map.fitBounds(bounds, { padding: [40, 40] })
+      if (plan.dessertCoord) {
+        addM('shared', plan.dessertCoord.lat, plan.dessertCoord.lng, `<strong>Gemeinsamer Nachspeise-Ort</strong><br/><small>${config.dessertAddress || ''}</small>`)
       }
-
-      // Build share URL
+      for (const team of plan.teams) {
+        if (hostIds.has(team.id)) continue
+        const c = plan.teamCoords[team.id]
+        if (c) addM('unselected', c.lat, c.lng, `<strong>${team.names}</strong><br/>Gast (nicht ausgewählt)<br/><small>${team.address || ''}</small>`)
+      }
+      if (points.length > 0) map.fitBounds(L.latLngBounds(points), { padding: [40, 40] })
       const encoded = btoa(JSON.stringify({ points, config: { dessertAddress: config.dessertAddress } }))
       setShareUrl(window.location.origin + '/map?data=' + encodeURIComponent(encoded))
-    })
+      setLoading(false)
+    } else {
+      // Fallback: geocode host addresses on-the-fly
+      const tasks = []
+      const hostsAdded = new Set()
+      for (const course of ['starter', 'main']) {
+        for (const g of (plan.groups[course] || [])) {
+          if (hostsAdded.has(g.host.id)) continue
+          hostsAdded.add(g.host.id)
+          const h = g.host
+          tasks.push(geocode(h.address).then(c => { if (c) addM(course, c.lat, c.lng, `<strong>${h.names}</strong><br/><small>${h.address}</small>`) }))
+        }
+      }
+      tasks.push(geocode(config.dessertAddress).then(c => { if (c) addM('shared', c.lat, c.lng, `<strong>Nachspeise-Ort</strong><br/><small>${config.dessertAddress}</small>`) }))
+      Promise.all(tasks).then(() => {
+        if (points.length > 0) map.fitBounds(L.latLngBounds(points), { padding: [40, 40] })
+        const encoded = btoa(JSON.stringify({ points, config: { dessertAddress: config.dessertAddress } }))
+        setShareUrl(window.location.origin + '/map?data=' + encodeURIComponent(encoded))
+        setLoading(false)
+      })
+    }
 
     return () => { if (mapInstanceRef.current) { mapInstanceRef.current.remove(); mapInstanceRef.current = null } }
   }, [plan, config])
 
+  const toggleCat = (cat) => {
+    const nv = { ...visibleCats, [cat]: !visibleCats[cat] }
+    setVisibleCats(nv)
+    ;(markersRef.current[cat] || []).forEach(m => { if (nv[cat]) m.addTo(mapInstanceRef.current); else m.remove() })
+  }
+
   const handleSavePdf = async () => {
     setSavingPdf(true)
     try {
-      const el = mapRef.current
-      const canvas = await html2canvas(el, { useCORS: true, scale: 1.5 })
+      const canvas = await html2canvas(mapRef.current, { useCORS: true, scale: 1.5 })
       const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
       const w = pdf.internal.pageSize.getWidth()
       const h = (canvas.height / canvas.width) * w
@@ -644,19 +794,20 @@ function MapTab({ plan, config }) {
 
   const handleShare = async () => {
     await navigator.clipboard.writeText(shareUrl)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2500)
+    setCopied(true); setTimeout(() => setCopied(false), 2500)
   }
 
   return (
     <div>
-      {/* Legend */}
-      <div className="flex flex-wrap gap-4 mb-4">
-        {[['starter', 'Vorspeise-Hosts', MARKER_COLORS.starter], ['main', 'Hauptspeise-Hosts', MARKER_COLORS.main], ['shared', 'Gemeinsamer Nachspeise-Ort', MARKER_COLORS.shared]].map(([, label, color]) => (
-          <div key={label} className="flex items-center gap-2 text-sm text-gray-600">
-            <div style={{ width: 14, height: 14, borderRadius: '50%', backgroundColor: color }} />
+      {/* Filter bar */}
+      <div className="flex flex-wrap gap-2 mb-4">
+        {MAP_CATS.map(({ key, label, color }) => (
+          <button key={key} onClick={() => toggleCat(key)}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-all"
+            style={{ borderColor: visibleCats[key] ? color : '#d1d5db', backgroundColor: visibleCats[key] ? color + '18' : 'white', color: visibleCats[key] ? color : '#9ca3af' }}>
+            <div style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: visibleCats[key] ? color : '#d1d5db' }} />
             {label}
-          </div>
+          </button>
         ))}
       </div>
 
@@ -664,10 +815,7 @@ function MapTab({ plan, config }) {
       <div className="relative rounded-2xl overflow-hidden border border-gray-200" style={{ height: 420 }}>
         {loading && (
           <div className="absolute inset-0 z-10 bg-white/80 flex items-center justify-center">
-            <div className="text-center">
-              <div className="text-3xl mb-2">🗺️</div>
-              <p className="text-sm text-gray-500">Adressen werden geocodiert…</p>
-            </div>
+            <div className="text-center"><div className="text-3xl mb-2">🗺️</div><p className="text-sm text-gray-500">Adressen werden geocodiert…</p></div>
           </div>
         )}
         <div ref={mapRef} style={{ width: '100%', height: '100%' }} />
@@ -675,19 +823,13 @@ function MapTab({ plan, config }) {
 
       {/* Buttons */}
       <div className="flex flex-col sm:flex-row gap-3 mt-4">
-        <button
-          onClick={handleSavePdf}
-          disabled={savingPdf || loading}
-          className="flex-1 py-2.5 px-4 rounded-xl font-semibold text-sm border border-gray-200 hover:bg-gray-50 transition-colors disabled:opacity-40"
-        >
+        <button onClick={handleSavePdf} disabled={savingPdf || loading}
+          className="flex-1 py-2.5 px-4 rounded-xl font-semibold text-sm border border-gray-200 hover:bg-gray-50 transition-colors disabled:opacity-40">
           {savingPdf ? '⏳ Speichern…' : '📥 Karte als PDF speichern'}
         </button>
-        <button
-          onClick={handleShare}
-          disabled={loading || !shareUrl}
+        <button onClick={handleShare} disabled={loading || !shareUrl}
           className="flex-1 py-2.5 px-4 rounded-xl font-semibold text-sm border transition-colors disabled:opacity-40"
-          style={{ borderColor: copied ? ACCENT : '#d1d5db', color: copied ? ACCENT : '#374151', backgroundColor: copied ? '#f0fdf6' : 'white' }}
-        >
+          style={{ borderColor: copied ? ACCENT : '#d1d5db', color: copied ? ACCENT : '#374151', backgroundColor: copied ? '#f0fdf6' : 'white' }}>
           {copied ? '✅ Link kopiert!' : '🔗 Kartenlink teilen'}
         </button>
       </div>
@@ -884,25 +1026,31 @@ const ROUTE_COLORS = [
 
 async function fetchOSRMRoute(waypoints) {
   const coords = waypoints.map(p => `${p.lng},${p.lat}`).join(';')
-  const url = `https://router.project-osrm.org/route/v1/driving/${coords}?overview=full&geometries=geojson&steps=false`
+  const url = `https://router.project-osrm.org/route/v1/bicycle/${coords}?overview=full&geometries=geojson&steps=false`
   const res = await fetch(url)
   if (!res.ok) throw new Error(`OSRM ${res.status}`)
   const data = await res.json()
   if (data.code !== 'Ok') throw new Error('OSRM: ' + data.code)
   const route = data.routes[0]
   return {
-    legs: route.legs.map(l => ({ distanceKm: Math.round(l.distance / 100) / 10 })),
-    totalKm: Math.round(route.distance / 100) / 10,
+    legs: route.legs.map(l => ({
+      distanceKm: Math.round(l.distance / 100) / 10,
+      durationMin: Math.round(l.duration / 60),
+    })),
+    totalKm:  Math.round(route.distance / 100) / 10,
+    totalMin: Math.round(route.duration / 60),
     geometry: route.geometry,
   }
 }
 
-function RoutesTab({ plan, config }) {
-  const mapRef = useRef(null)
+function RoutesTab({ plan, config, compact = false }) {
+  const mapRef         = useRef(null)
   const mapInstanceRef = useRef(null)
-  const [routeData, setRouteData] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [progress, setProgress] = useState({ done: 0, total: 0 })
+  const routeLayersRef = useRef({}) // teamId → L.polyline
+  const [routeData,    setRouteData]    = useState(null)
+  const [loading,      setLoading]      = useState(true)
+  const [progress,     setProgress]     = useState({ done: 0, total: 0 })
+  const [visibleTeams, setVisibleTeams] = useState({})
 
   useEffect(() => {
     loadRoutes()
@@ -917,7 +1065,7 @@ function RoutesTab({ plan, config }) {
     const results = []
     for (const team of plan.teams) {
       const homeCoord    = plan.teamCoords[team.id]
-      if (!homeCoord) { results.push({ team, legs: null, totalKm: null, fallback: false, error: 'Keine Koordinaten' }); continue }
+      if (!homeCoord) { results.push({ team, legs: null, totalKm: null, totalMin: null, fallback: false, error: 'Keine Koordinaten' }); continue }
 
       const starterCoord = plan.teamCoords[team.groups?.starter?.host?.id]
       const mainCoord    = plan.teamCoords[team.groups?.main?.host?.id]
@@ -926,29 +1074,36 @@ function RoutesTab({ plan, config }) {
 
       if (waypoints.length >= 2) {
         try {
-          const { legs, totalKm, geometry } = await fetchOSRMRoute(waypoints)
-          results.push({ team, legs, totalKm, geometry, waypoints, fallback: false })
+          const { legs, totalKm, totalMin, geometry } = await fetchOSRMRoute(waypoints)
+          results.push({ team, legs, totalKm, totalMin, geometry, waypoints, fallback: false })
           await new Promise(r => setTimeout(r, 1000))
         } catch {
           const legs = []
           for (let i = 0; i < waypoints.length - 1; i++)
-            legs.push({ distanceKm: Math.round(haversineDistance(waypoints[i], waypoints[i+1]) * 10) / 10 })
-          results.push({ team, legs, totalKm: Math.round(legs.reduce((s,l) => s + l.distanceKm, 0) * 10) / 10, waypoints, fallback: true })
+            legs.push({ distanceKm: Math.round(haversineDistance(waypoints[i], waypoints[i+1]) * 10) / 10, durationMin: null })
+          const totalKm = Math.round(legs.reduce((s,l) => s + l.distanceKm, 0) * 10) / 10
+          results.push({ team, legs, totalKm, totalMin: null, waypoints, fallback: true })
         }
       } else {
-        results.push({ team, legs: null, totalKm: null, fallback: false, error: 'Unvollständige Koordinaten' })
+        results.push({ team, legs: null, totalKm: null, totalMin: null, fallback: false, error: 'Unvollständige Koordinaten' })
       }
       setProgress(p => ({ ...p, done: p.done + 1 }))
     }
 
+    // Init all teams visible
+    const vis = {}
+    for (const { team } of results) vis[team.id] = true
+    setVisibleTeams(vis)
+
     setRouteData(results)
     setLoading(false)
-    drawMap(results)
+    drawMap(results, vis)
   }
 
-  const drawMap = (results) => {
+  const drawMap = (results, vis) => {
     if (!window.L || !mapRef.current) return
     if (mapInstanceRef.current) { mapInstanceRef.current.remove(); mapInstanceRef.current = null }
+    routeLayersRef.current = {}
     const L = window.L
     const map = L.map(mapRef.current).setView([52.52, 13.405], 12)
     mapInstanceRef.current = map
@@ -957,56 +1112,106 @@ function RoutesTab({ plan, config }) {
       maxZoom: 19,
     }).addTo(map)
     const allPoints = []
-    results.forEach(({ team, geometry, waypoints, fallback }, idx) => {
+    results.forEach(({ team, geometry, waypoints }, idx) => {
       const color = ROUTE_COLORS[idx % ROUTE_COLORS.length]
+      let layer
       if (geometry) {
         const latlngs = geometry.coordinates.map(c => [c[1], c[0]])
-        L.polyline(latlngs, { color, weight: 3, opacity: 0.75 }).addTo(map).bindPopup(team.names)
+        layer = L.polyline(latlngs, { color, weight: 3, opacity: 0.75 }).bindPopup(team.names)
         allPoints.push(...latlngs)
       } else if (waypoints) {
         const latlngs = waypoints.map(p => [p.lat, p.lng])
-        L.polyline(latlngs, { color, weight: 2, opacity: 0.5, dashArray: '6 4' }).addTo(map).bindPopup(team.names)
+        layer = L.polyline(latlngs, { color, weight: 2, opacity: 0.5, dashArray: '6 4' }).bindPopup(team.names)
         allPoints.push(...latlngs)
+      }
+      if (layer) {
+        routeLayersRef.current[team.id] = layer
+        if (vis[team.id] !== false) layer.addTo(map)
       }
     })
     if (allPoints.length > 0) map.fitBounds(L.latLngBounds(allPoints), { padding: [30, 30] })
   }
 
+  const toggleTeam = (teamId) => {
+    setVisibleTeams(v => {
+      const nv = { ...v, [teamId]: !v[teamId] }
+      const layer = routeLayersRef.current[teamId]
+      if (layer && mapInstanceRef.current) {
+        if (nv[teamId]) layer.addTo(mapInstanceRef.current)
+        else layer.remove()
+      }
+      return nv
+    })
+  }
+  const setAllVisible = (val) => {
+    setVisibleTeams(v => {
+      const nv = Object.fromEntries(Object.keys(v).map(k => [k, val]))
+      Object.entries(routeLayersRef.current).forEach(([id, layer]) => {
+        if (mapInstanceRef.current) { if (val) layer.addTo(mapInstanceRef.current); else layer.remove() }
+      })
+      return nv
+    })
+  }
+
   const wpLabels = (team) => [
     { emoji: '🏠', label: `Start: ${team.address || team.names}` },
-    { emoji: '🥗', label: `Vorspeise bei ${team.groups?.starter?.host?.names || '?'}` + (team.groups?.starter?.host?.address ? ` (${team.groups.starter.host.address})` : '') },
-    { emoji: '🍝', label: `Hauptspeise bei ${team.groups?.main?.host?.names || '?'}` + (team.groups?.main?.host?.address ? ` (${team.groups.main.host.address})` : '') },
-    { emoji: '🍰', label: `Nachspeise: ${config.dessertAddress || 'Gemeinsamer Ort'} (gemeinsam)` },
+    { emoji: '🥗', label: `Vorspeise: ${team.groups?.starter?.host?.address || team.groups?.starter?.host?.names || '?'}` },
+    { emoji: '🍝', label: `Hauptspeise: ${team.groups?.main?.host?.address || team.groups?.main?.host?.names || '?'}` },
+    { emoji: '🍰', label: `Nachspeise: ${config.dessertAddress || 'Gemeinsamer Ort'}` },
   ]
 
   if (!plan.teamCoords) {
     return (
-      <div className="text-center py-12 text-gray-400">
-        <div className="text-4xl mb-3">🗺️</div>
-        <p>Keine Koordinaten. Bitte den Plan mit aktivem Geocoding neu generieren.</p>
+      <div className="text-center py-8 text-gray-400">
+        <div className="text-3xl mb-2">🚲</div>
+        <p className="text-sm">Keine Koordinaten. Plan neu generieren.</p>
       </div>
     )
   }
 
   const validRoutes = (routeData || []).filter(r => r.totalKm !== null)
-  const avgKm = validRoutes.length > 0 ? Math.round(validRoutes.reduce((s,r) => s + r.totalKm, 0) / validRoutes.length * 10) / 10 : null
-  const maxR  = validRoutes.length > 0 ? validRoutes.reduce((a,b) => a.totalKm > b.totalKm ? a : b) : null
-  const minR  = validRoutes.length > 0 ? validRoutes.reduce((a,b) => a.totalKm < b.totalKm ? a : b) : null
+  const avgKm  = validRoutes.length > 0 ? Math.round(validRoutes.reduce((s,r) => s + r.totalKm,  0) / validRoutes.length * 10) / 10 : null
+  const avgMin = validRoutes.filter(r => r.totalMin !== null).length > 0
+    ? Math.round(validRoutes.filter(r => r.totalMin !== null).reduce((s,r) => s + r.totalMin, 0) / validRoutes.filter(r => r.totalMin !== null).length)
+    : null
+  const maxR = validRoutes.length > 0 ? validRoutes.reduce((a,b) => a.totalKm > b.totalKm ? a : b) : null
+  const minR = validRoutes.length > 0 ? validRoutes.reduce((a,b) => a.totalKm < b.totalKm ? a : b) : null
 
   return (
     <div>
       {loading && (
         <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-xl">
-          <p className="text-sm font-semibold text-blue-900 mb-2">🗺️ Routen werden berechnet… ({progress.done}/{progress.total} Teams)</p>
+          <p className="text-sm font-semibold text-blue-900 mb-2">🚲 Fahrrad-Routen werden berechnet… ({progress.done}/{progress.total} Teams)</p>
           <div className="w-full bg-blue-100 rounded-full h-2">
             <div className="h-2 rounded-full transition-all" style={{ width: `${progress.total > 0 ? progress.done / progress.total * 100 : 0}%`, backgroundColor: ACCENT }} />
           </div>
-          <p className="text-xs text-blue-500 mt-1">OSRM Routing · ca. 1 Sek. pro Team</p>
+          <p className="text-xs text-blue-500 mt-1">OSRM Bicycle Routing · ca. 1 Sek. pro Team</p>
         </div>
       )}
 
-      {/* Map */}
-      <div className="relative rounded-2xl overflow-hidden border border-gray-200 mb-5" style={{ height: 360 }}>
+      {/* Map with team filter */}
+      {routeData && !loading && (
+        <div className="mb-4">
+          <div className="flex items-center gap-2 mb-2 flex-wrap">
+            <span className="text-xs text-gray-500 font-semibold">Teams einblenden:</span>
+            <button onClick={() => setAllVisible(true)}  className="text-xs px-2 py-1 rounded border border-gray-200 hover:bg-gray-50">Alle</button>
+            <button onClick={() => setAllVisible(false)} className="text-xs px-2 py-1 rounded border border-gray-200 hover:bg-gray-50">Keine</button>
+            {routeData.map(({ team }, idx) => {
+              const color = ROUTE_COLORS[idx % ROUTE_COLORS.length]
+              return (
+                <button key={team.id} onClick={() => toggleTeam(team.id)}
+                  className="flex items-center gap-1 text-xs px-2 py-1 rounded border transition-all"
+                  style={{ borderColor: visibleTeams[team.id] ? color : '#d1d5db', backgroundColor: visibleTeams[team.id] ? color + '18' : 'white', color: visibleTeams[team.id] ? color : '#9ca3af' }}>
+                  <div style={{ width: 6, height: 6, borderRadius: '50%', backgroundColor: visibleTeams[team.id] ? color : '#d1d5db' }} />
+                  {team.names.split('&')[0].trim()}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      <div className="relative rounded-2xl overflow-hidden border border-gray-200 mb-5" style={{ height: compact ? 260 : 360 }}>
         {loading && !routeData && (
           <div className="absolute inset-0 z-10 bg-white/80 flex items-center justify-center">
             <p className="text-sm text-gray-400">Karte wird geladen…</p>
@@ -1019,13 +1224,13 @@ function RoutesTab({ plan, config }) {
       {routeData && validRoutes.length > 0 && (
         <div className="grid grid-cols-3 gap-3 mb-5">
           {[
-            { label: 'Ø Strecke', val: `${avgKm} km` },
-            { label: 'Längste', val: maxR ? `${maxR.team.names.split('&')[0].trim()}: ${maxR.totalKm} km` : '—' },
-            { label: 'Kürzeste', val: minR ? `${minR.team.names.split('&')[0].trim()}: ${minR.totalKm} km` : '—' },
+            { label: 'Ø Strecke', val: `${avgKm} km${avgMin !== null ? ` · ca. ${avgMin} min` : ''}` },
+            { label: 'Längste', val: maxR ? `${maxR.team.names.split('&')[0].trim()}: ${maxR.totalKm} km${maxR.totalMin !== null ? ` · ${maxR.totalMin} min` : ''}` : '—' },
+            { label: 'Kürzeste', val: minR ? `${minR.team.names.split('&')[0].trim()}: ${minR.totalKm} km${minR.totalMin !== null ? ` · ${minR.totalMin} min` : ''}` : '—' },
           ].map(({ label, val }) => (
             <div key={label} className="bg-gray-50 rounded-xl p-3 text-center border border-gray-100">
               <p className="text-xs text-gray-400 mb-1">{label}</p>
-              <p className="text-sm font-bold text-gray-800">{val}</p>
+              <p className="text-xs font-bold text-gray-800 leading-snug">{val}</p>
             </div>
           ))}
         </div>
@@ -1034,15 +1239,19 @@ function RoutesTab({ plan, config }) {
       {/* Per-team cards */}
       {routeData && (
         <div className="space-y-3">
-          {routeData.map(({ team, legs, totalKm, fallback, error }, idx) => {
+          {routeData.map(({ team, legs, totalKm, totalMin, fallback, error }, idx) => {
             const labels = wpLabels(team)
             const color  = ROUTE_COLORS[idx % ROUTE_COLORS.length]
             return (
               <div key={team.id} className="bg-white rounded-xl border border-gray-200 p-4">
-                <div className="flex items-center gap-2 mb-3">
+                <div className="flex items-center gap-2 mb-2">
                   <div style={{ width: 12, height: 12, borderRadius: '50%', backgroundColor: color, flexShrink: 0 }} />
                   <span className="font-semibold text-gray-900 flex-1">{team.names}</span>
-                  {totalKm !== null && <span className="text-sm font-bold" style={{ color: ACCENT }}>{totalKm} km</span>}
+                  {totalKm !== null && (
+                    <span className="text-xs font-bold" style={{ color: ACCENT }}>
+                      {totalKm} km{totalMin !== null ? ` · 🚲 ca. ${totalMin} min` : ''}
+                    </span>
+                  )}
                   {fallback && <span className="text-xs text-orange-500">(Luftlinie)</span>}
                 </div>
                 {error ? (
@@ -1058,7 +1267,9 @@ function RoutesTab({ plan, config }) {
                         {i < labels.length - 1 && legs[i] && (
                           <div className="flex items-center gap-1 ml-5 my-0.5">
                             <div className="w-px h-3 bg-gray-200 ml-0.5" />
-                            <span className="text-xs text-gray-400 ml-1">{legs[i].distanceKm} km{fallback ? ' (Luftlinie)' : ''}</span>
+                            <span className="text-xs text-gray-400 ml-1">
+                              ↓ {legs[i].distanceKm} km{legs[i].durationMin !== null ? ` · 🚲 ca. ${legs[i].durationMin} min` : fallback ? ' (Luftlinie)' : ''}
+                            </span>
                           </div>
                         )}
                       </div>
@@ -1145,7 +1356,6 @@ function Step5({ plan, teams, config, onBack }) {
     { id: 'messages', label: '💬 Nachrichten' },
     { id: 'map',      label: '🗺️ Karte' },
     { id: 'routes',   label: '🚗 Routen' },
-    { id: 'notes',    label: '⚠️ Hinweise' },
   ]
 
   return (
@@ -1238,31 +1448,6 @@ function Step5({ plan, teams, config, onBack }) {
 
       {tab === 'routes' && (
         <RoutesTab plan={plan} config={config} />
-      )}
-
-      {tab === 'notes' && (
-        <div>
-          {teamsWithAllergies.length === 0 ? (
-            <div className="text-center py-12 text-gray-400">
-              <div className="text-4xl mb-3">✅</div>
-              <p className="font-medium">Keine Allergien oder Unverträglichkeiten gemeldet.</p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              <p className="text-sm text-gray-500 mb-4">{teamsWithAllergies.length} Team(s) mit Allergien oder Unverträglichkeiten:</p>
-              {teamsWithAllergies.map((team, i) => (
-                <div key={i} className="flex gap-4 p-4 bg-orange-50 border border-orange-200 rounded-xl">
-                  <span className="text-xl">⚠️</span>
-                  <div>
-                    <p className="font-semibold text-gray-900">{team.names}</p>
-                    <p className="text-sm text-orange-700 mt-0.5">{team.allergies}</p>
-                    <p className="text-xs text-gray-400 mt-1">Kocht: {courseLabels[team.hostCourse]} | Ernährung: {team.diet}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
       )}
 
       <button onClick={onBack} className="mt-8 w-full py-3 rounded-xl font-semibold text-gray-700 border border-gray-200 hover:bg-gray-50 transition-colors">
