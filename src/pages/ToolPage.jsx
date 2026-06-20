@@ -75,9 +75,15 @@ function buildIcs(team, config, messageText) {
   ].join('\r\n')
 }
 
-// ─── Phone cleaner ────────────────────────────────────────────────────────────
+// ─── Phone helpers ────────────────────────────────────────────────────────────
 function cleanPhone(raw) {
   return String(raw || '').replace(/[^\d+]/g, '').trim()
+}
+
+function formatWhatsAppNumber(raw) {
+  let cleaned = String(raw || '').replace(/[^\d+]/g, '')
+  if (cleaned.startsWith('0')) cleaned = '+49' + cleaned.slice(1)
+  return cleaned.replace('+', '')
 }
 
 const ACCENT = '#1D9E75'
@@ -1098,9 +1104,9 @@ function MessagesTab({ messages, config, handleMessageDocx }) {
     }
   }
 
-  // ── WhatsApp Broadcast ──
+  // ── WhatsApp Nummern ──
   const allPhones = messages.flatMap(({ team }) =>
-    [team.phone, team.phone1, team.phone2].filter(Boolean).map(cleanPhone).filter(p => p.length >= 6)
+    [team.phone, team.phone2].filter(Boolean).map(formatWhatsAppNumber).filter(p => p.length >= 7)
   ).filter((p, i, arr) => arr.indexOf(p) === i)
   const phonesText = allPhones.join('\n')
   const [phonesCopied, setPhonesCopied] = useState(false)
@@ -1162,31 +1168,82 @@ function MessagesTab({ messages, config, handleMessageDocx }) {
         </div>
       </div>
 
-      {/* ── WhatsApp Broadcast Section ── */}
+      {/* ── WhatsApp-Gruppe Section ── */}
       <div className="border border-gray-200 rounded-xl overflow-hidden">
         <div className="px-5 py-4 bg-gray-50 border-b border-gray-200">
           <div className="flex items-center gap-2">
             <span className="text-lg">💬</span>
-            <span className="font-semibold text-gray-900 text-sm">WhatsApp-Broadcast</span>
+            <span className="font-semibold text-gray-900 text-sm">WhatsApp-Gruppe erstellen</span>
             <span className="text-xs text-gray-400">({allPhones.length} Nummern)</span>
           </div>
         </div>
-        <div className="px-5 py-4 space-y-4">
-          <p className="text-xs text-gray-500 leading-relaxed">
-            Ein WhatsApp-Broadcast erlaubt dir, allen Teilnehmern gleichzeitig eine Nachricht zu schicken, ohne dass sie sich gegenseitig sehen.
-          </p>
-          <textarea
-            readOnly value={phonesText}
-            rows={Math.min(allPhones.length, 8)}
-            className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-xs font-mono text-gray-700 bg-gray-50 resize-none focus:outline-none"
-          />
-          <button onClick={copyPhones}
-            className="w-full py-2.5 rounded-lg text-sm font-semibold border transition-colors"
-            style={{ borderColor: phonesCopied ? ACCENT : '#d1d5db', color: phonesCopied ? ACCENT : '#374151', backgroundColor: phonesCopied ? '#f0fdf6' : 'white' }}>
-            {phonesCopied ? '✅ Nummern kopiert!' : '📋 Alle Nummern kopieren'}
-          </button>
+        <div className="px-5 py-4 space-y-5">
           <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-xs text-blue-800 leading-relaxed">
-            💡 Öffne WhatsApp → Neue Broadcast-Liste → füge die kopierten Nummern hinzu. Alle Teilnehmer erhalten die Nachricht einzeln – sie sehen sich nicht gegenseitig.
+            💡 Der einfachste Weg alle Teilnehmer zu erreichen ist eine WhatsApp-Gruppe.<br />
+            Ein Broadcast funktioniert nur wenn alle Teilnehmer deine Nummer bereits gespeichert haben –
+            das ist meist nicht der Fall. Eine Gruppe ist zuverlässiger.
+          </div>
+
+          {/* Bereich 1: Alle Nummern */}
+          <div>
+            <p className="text-xs font-semibold text-gray-700 mb-2">📋 Alle Nummern auf einmal (für Desktop)</p>
+            <textarea
+              readOnly value={phonesText}
+              rows={Math.min(allPhones.length, 8)}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-xs font-mono text-gray-700 bg-gray-50 resize-none focus:outline-none mb-2"
+            />
+            <button onClick={copyPhones}
+              className="w-full py-2.5 rounded-lg text-sm font-semibold border transition-colors mb-2"
+              style={{ borderColor: phonesCopied ? ACCENT : '#d1d5db', color: phonesCopied ? ACCENT : '#374151', backgroundColor: phonesCopied ? '#f0fdf6' : 'white' }}>
+              {phonesCopied ? '✅ Alle Nummern kopiert!' : '📋 Alle Nummern kopieren'}
+            </button>
+            <p className="text-xs text-gray-400 leading-relaxed">
+              Öffne WhatsApp → Neue Gruppe → füge die Nummern manuell hinzu. Oder nutze die Einzellinks unten auf dem Handy.
+            </p>
+          </div>
+
+          {/* Bereich 2: Einzellinks */}
+          <div>
+            <p className="text-xs font-semibold text-gray-700 mb-2">📱 Einzeln in WhatsApp öffnen (empfohlen auf dem Handy)</p>
+            <div className="space-y-2">
+              {messages.map(({ team }, i) => {
+                const nums = [team.phone, team.phone2].filter(Boolean)
+                const validNums = nums.map(n => formatWhatsAppNumber(n)).filter(n => n.length >= 7)
+                return (
+                  <div key={i} className="flex items-center gap-2 flex-wrap py-1.5 border-b border-gray-100 last:border-b-0">
+                    <span className="text-xs text-gray-700 font-medium flex-1 min-w-0 truncate">{team.names}</span>
+                    <span className="text-xs text-gray-400">{nums[0] ? cleanPhone(nums[0]) : '—'}</span>
+                    {validNums.length === 0 ? (
+                      <span className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 text-gray-300 cursor-not-allowed" title="Keine gültige Nummer vorhanden">
+                        WhatsApp
+                      </span>
+                    ) : validNums.length === 1 ? (
+                      <a href={`https://wa.me/${validNums[0]}`} target="_blank" rel="noopener noreferrer"
+                        className="text-xs px-3 py-1.5 rounded-lg font-semibold text-white"
+                        style={{ backgroundColor: '#25d366' }}>
+                        WhatsApp öffnen
+                      </a>
+                    ) : (
+                      <>
+                        <a href={`https://wa.me/${validNums[0]}`} target="_blank" rel="noopener noreferrer"
+                          className="text-xs px-2.5 py-1.5 rounded-lg font-semibold text-white"
+                          style={{ backgroundColor: '#25d366' }}>
+                          Gast 1
+                        </a>
+                        <a href={`https://wa.me/${validNums[1]}`} target="_blank" rel="noopener noreferrer"
+                          className="text-xs px-2.5 py-1.5 rounded-lg font-semibold text-white"
+                          style={{ backgroundColor: '#128c7e' }}>
+                          Gast 2
+                        </a>
+                      </>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+            <p className="text-xs text-gray-400 mt-3 leading-relaxed">
+              Öffne den ersten Kontakt, erstelle eine neue Gruppe, und füge weitere Kontakte über die Einzellinks hinzu.
+            </p>
           </div>
         </div>
       </div>
