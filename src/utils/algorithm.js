@@ -191,32 +191,57 @@ export function generatePlan(teams) {
   }
 }
 
+function normalizeDiet(raw) {
+  const s = String(raw || '').toLowerCase().trim()
+  if (s.includes('vegan')) return 'vegan'
+  if (s.includes('vegetar')) return 'vegetarisch'
+  return 'omnivor'
+}
+
+export function getRequiredDiet(tischTeams) {
+  const diets = tischTeams.map(t => normalizeDiet(t.diet))
+  if (diets.includes('vegan')) return 'vegan'
+  if (diets.includes('vegetarisch')) return 'vegetarisch'
+  return 'omnivor'
+}
+
 export function buildMessage(team, plan, config) {
   const { date, timeStarter, timeMain, timeDessert, dessertAddress, dessertDoorbell, contacts, whatsappLink } = config
 
   const starterGroup = team.groups.starter
-  const mainGroup = team.groups.main
-  const dessertGroup = team.groups.dessert
+  const mainGroup    = team.groups.main
 
-  const getAddress = (group) => {
-    if (!group) return 'TBD'
-    return group.host.address || group.host.names
-  }
-  const getDoorbell = (group) => {
-    if (!group) return ''
-    return group.host.doorbell || group.host.names
-  }
+  const getAddress  = (group) => group ? (group.host.address || group.host.names) : 'TBD'
+  const getDoorbell = (group) => group ? (group.host.doorbell || group.host.names) : ''
 
   const cookingCourse = team.hostCourse
-  const courseLabels = { starter: 'Vorspeise', main: 'Hauptspeise', dessert: 'Nachspeise' }
-  const cookLabel = courseLabels[cookingCourse] || ''
+  const courseLabels  = { starter: 'Vorspeise', main: 'Hauptspeise', dessert: 'Nachspeise' }
+  const cookLabel     = courseLabels[cookingCourse] || ''
 
-  const dietLabel = team.diet === 'vegan' ? 'vegane' : team.diet === 'vegetarisch' ? 'vegetarische' : ''
-  const allergyNote = team.allergies ? ` (ohne ${team.allergies})` : ''
+  // Determine required diet from all teams at the cooking table
+  let cookingGroup = null
+  if (cookingCourse === 'starter') cookingGroup = starterGroup
+  else if (cookingCourse === 'main') cookingGroup = mainGroup
+
+  let requiredDiet = 'omnivor'
+  let allergiesAtTable = []
+
+  if (cookingGroup) {
+    const tischTeams = [cookingGroup.host, ...cookingGroup.guests]
+    requiredDiet = getRequiredDiet(tischTeams)
+    allergiesAtTable = tischTeams.filter(t => t.allergies && t.allergies.trim() && t.id !== team.id).map(t => t.allergies.trim())
+  } else if (cookingCourse === 'dessert') {
+    // All teams come to dessert — use most restrictive across all
+    requiredDiet = getRequiredDiet(plan.teams)
+    allergiesAtTable = plan.teams.filter(t => t.allergies && t.allergies.trim() && t.id !== team.id).map(t => t.allergies.trim())
+  }
+
+  const dietAdj = requiredDiet === 'vegan' ? 'vegane' : requiredDiet === 'vegetarisch' ? 'vegetarische' : ''
+  const allergyNote = allergiesAtTable.length > 0 ? ` – bitte ohne ${allergiesAtTable.join(', ')} (Allergie/Unverträglichkeit eines Gastes)` : ''
   const personCount = 6
 
-  const cookingLine = dietLabel
-    ? `👩‍🍳 Bitte bereitet eine ${dietLabel} ${cookLabel}${allergyNote} für ca. ${personCount} Personen vor.`
+  const cookingLine = dietAdj
+    ? `👩‍🍳 Bitte bereitet eine ${dietAdj} ${cookLabel}${allergyNote} für ca. ${personCount} Personen vor.`
     : `👩‍🍳 Bitte bereitet eine ${cookLabel}${allergyNote} für ca. ${personCount} Personen vor.`
 
   const broadcastLine = whatsappLink

@@ -504,7 +504,7 @@ function Step4ManualAdjustment({ plan, config, onNext, onBack }) {
 
   const DIET_COLOR   = { vegan: 'bg-green-100 text-green-700', vegetarisch: 'bg-lime-100 text-lime-700', omnivor: 'bg-gray-100 text-gray-500' }
   const DIET_EMOJI   = { vegan: '🌱', vegetarisch: '🥗', omnivor: '🥩' }
-  const COURSE_LABEL = { starter: '🥗 Vorspeise', main: '🍝 Hauptspeise', dessert: '👤 Gast' }
+  const COURSE_LABEL = { starter: '🥗 Vorspeise', main: '🍝 Hauptspeise', dessert: '🍰 Nachspeise' }
   const COURSE_COLOR = { starter: '#3b82f6', main: '#8b5cf6' }
 
   const dietBadge = (diet) => (
@@ -746,7 +746,7 @@ function Step4ManualAdjustment({ plan, config, onNext, onBack }) {
                           className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-white text-gray-700 font-medium cursor-pointer hover:border-gray-300 focus:outline-none focus:ring-1">
                           <option value="starter">🥗 Vorspeise</option>
                           <option value="main">🍝 Hauptspeise</option>
-                          <option value="dessert">👤 Gast</option>
+                          <option value="dessert">🍰 Nachspeise</option>
                         </select>
                       </td>
                       <td className="px-3 py-2.5">
